@@ -1,3 +1,4 @@
+#app/schemas/inference_response.py
 from typing import Optional, List
 from pydantic import BaseModel, Field
 

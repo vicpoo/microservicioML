@@ -1,3 +1,4 @@
+#app/main.py
 from fastapi import FastAPI
 from app.api.routes import inference, history
 from app.core.config import get_settings

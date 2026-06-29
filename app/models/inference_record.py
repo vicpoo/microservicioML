@@ -1,3 +1,4 @@
+#app/models/inference_record.py
 from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.sql import func
 from app.models.database import Base

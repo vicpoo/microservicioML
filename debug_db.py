@@ -1,3 +1,4 @@
+#debug_db.py
 from app.models.database import init_db, engine
 import sqlite3
 

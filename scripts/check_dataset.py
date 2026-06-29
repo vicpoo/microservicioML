@@ -1,3 +1,4 @@
+#scripts/check_dataset.py
 import pandas as pd
 
 df = pd.read_csv("data/raw/lecturas_ml_training.csv")

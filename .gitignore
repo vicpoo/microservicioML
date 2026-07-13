@@ -1,0 +1,80 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# Variables de entorno
+.env
+.env.*
+
+# =========================
+# Modelos de Machine Learning
+# =========================
+*.joblib
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.onnx
+*.h5
+*.keras
+*.ckpt
+
+# Carpeta de artefactos
+app/ml/artifacts/
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# Cobertura y pruebas
+# =========================
+.coverage
+.pytest_cache/
+htmlcov/
+
+# =========================
+# VS Code
+# =========================
+.vscode/
+
+# =========================
+# PyCharm
+# =========================
+.idea/
+
+# =========================
+# Archivos del sistema
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Compilados
+# =========================
+build/
+dist/
+*.egg-info/
+
+# =========================
+# Caché
+# =========================
+.mypy_cache/
+.ruff_cache/
+.cache/

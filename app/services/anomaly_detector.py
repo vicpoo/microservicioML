@@ -1,66 +1,115 @@
-#app/services/anomaly_detector.py
-import joblib
+# Archivo: app/services/anomaly_detector.py
+# Carpeta: microservicioMLL/app/services/
+# (pega/reemplaza este archivo en esa ruta dentro de tu proyecto)
+
 import os
-from typing import Dict, List, Tuple
-from sklearn.ensemble import IsolationForest
-import numpy as np
+from typing import Dict, Optional, Tuple
+
+import joblib
+import pandas as pd
+
+from app.services.rules import TIPO_SEVERIDAD_DEFAULT, evaluar_lectura, peor_severidad
+
+ARTIFACTS_DIR = os.path.join(os.path.dirname(__file__), "..", "ml", "artifacts")
 
 
 class AnomalyDetector:
-    def __init__(self, model_path: str = "app/ml/artifacts/isolation_forest.joblib"):
-        self.model_path = model_path
-        self.model = None
-        self.expected_features = 10
-        self._load_or_train_default()
+    """Ensemble: motor de reglas de dominio (determinista) + RandomForest (supervisado,
+    generaliza patrones) + IsolationForest (no supervisado, atrapa outliers novedosos que
+    ni las reglas ni el clasificador conocen). Las reglas garantizan que situaciones
+    críticas conocidas (ej. lluvia) SIEMPRE se detecten aunque el modelo aún no las haya
+    visto; el ensemble ML generaliza más allá de los umbrales fijos.
+    """
 
-    def _load_or_train_default(self) -> None:
-        if os.path.exists(self.model_path):
-            self.model = joblib.load(self.model_path)
-            if getattr(self.model, "n_features_in_", None) != self.expected_features:
-                self.model = self._train_default_model()
-            return
+    def __init__(self, artifacts_dir: str = ARTIFACTS_DIR):
+        self.artifacts_dir = artifacts_dir
+        self.rf_tipo = self._load("rf_tipo_anomalia.joblib")
+        self.isolation = self._load("isolation_forest.joblib")
 
-        self.model = self._train_default_model()
+    def _load(self, filename: str) -> Optional[dict]:
+        path = os.path.join(self.artifacts_dir, filename)
+        if not os.path.exists(path):
+            return None
+        return joblib.load(path)
 
-    def _train_default_model(self):
-        X = np.array([
-            [28, 28, 60, 45, 4, 0, 30000, 0, 15, 0],
-            [29, 29, 62, 46, 4.2, 0, 31000, 0, 14.8, 0],
-            [30, 30, 58, 44, 4.5, 0, 32000, 0, 12.9, 0],
-            [32, 31, 85, 48, 0.4, 0, 10000, 1, 212.5, 0],
-            [33, 32, 90, 50, 0.2, 1, 8000, 1, 450, 1],
-            [42, 33, 70, 46, 2.2, 0, 25000, 9, 31.8, 0],
-        ], dtype=float)
-        model = IsolationForest(contamination=0.2, random_state=42)
-        model.fit(X)
-        os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
-        joblib.dump(model, self.model_path)
-        return model
+    def _fila_ml(self, tipo_proceso: str, features: Dict[str, float]) -> pd.DataFrame:
+        return pd.DataFrame([{
+            "tipo_proceso": tipo_proceso,
+            "temperatura_grano": features["temperatura_grano"],
+            "temperatura_ambiental": features["temperatura_ambiental"],
+            "humedad_ambiental": features["humedad_ambiental"],
+            "humedad_grano": features["humedad_grano"],
+            "lluvia": features["lluvia"],
+            "luz": features["luz"],
+            "delta_temp": features["delta_temp"],
+        }])
 
-    def predict(self, features: Dict[str, float]) -> Tuple[bool, float, List[str]]:
-        if self.model is None:
-            raise RuntimeError("Modelo no cargado")
-        row = np.array([
-            features.get("temperatura_grano", 0.0),
-            features.get("temperatura_ambiental", 0.0),
-            features.get("humedad_ambiental", 0.0),
-            features.get("humedad_grano", 0.0),
-            features.get("viento", 0.0),
-            features.get("lluvia", 0.0),
-            features.get("luz", 0.0),
-            features.get("delta_temp", 0.0),
-            features.get("indice_moho", 0.0),
-            features.get("lluvia_binaria", 0.0),
-        ], dtype=float).reshape(1, -1)
-        pred = self.model.predict(row)[0]
-        score = float(self.model.decision_function(row)[0])
-        is_anomaly = pred == -1
-        contrib = []
-        if is_anomaly:
-            if features.get("humedad_ambiental", 0.0) > 80:
-                contrib.append("humedad_ambiental")
-            if features.get("viento", 0.0) < 1:
-                contrib.append("viento")
-            if features.get("lluvia", 0.0) >= 0.5:
-                contrib.append("lluvia")
-        return is_anomaly, score, contrib
+    def predict(
+        self,
+        tipo_proceso: str,
+        features: Dict[str, float],
+        delta_temp_reciente: Optional[float] = None,
+        delta_humedad_grano_24h: Optional[float] = None,
+    ) -> Dict:
+        tipo_proceso = (tipo_proceso or "lavado").lower()
+
+        regla = evaluar_lectura(
+            tipo_proceso, features,
+            delta_temp_reciente=delta_temp_reciente,
+            delta_humedad_grano_24h=delta_humedad_grano_24h,
+        )
+
+        fila = self._fila_ml(tipo_proceso, features)
+
+        tipo_ml, confianza_ml = "normal", 0.0
+        if self.rf_tipo is not None:
+            pipe = self.rf_tipo["modelo"]
+            proba = pipe.predict_proba(fila)[0]
+            clases = pipe.named_steps["clf"].classes_
+            idx = proba.argmax()
+            tipo_ml, confianza_ml = clases[idx], float(proba[idx])
+
+        outlier_ml = False
+        score_if = 0.0
+        if self.isolation is not None:
+            modelo_if = self.isolation["modelo"]
+            cols = self.isolation["features"]
+            fila_if = fila[cols]
+            outlier_ml = bool(modelo_if.predict(fila_if)[0] == -1)
+            score_if = float(modelo_if.decision_function(fila_if)[0])
+
+        # Las reglas (umbrales exactos del PDF) son la fuente autoritativa cuando SÍ detectan
+        # algo: dan una severidad graduada y precisa. El RandomForest solo puede ELEVAR la
+        # severidad cuando las reglas no encontraron nada pero el modelo reconoce un patrón
+        # de anomalía (generalización más allá de los umbrales fijos); no debe "aplanar" a
+        # su severidad por defecto un caso que las reglas ya clasificaron más fino.
+        severidad_ml = TIPO_SEVERIDAD_DEFAULT.get(tipo_ml, "normal")
+        if regla["severidad"] == "normal" and tipo_ml != "normal":
+            severidad_final = peor_severidad(regla["severidad"], severidad_ml)
+        else:
+            severidad_final = regla["severidad"]
+
+        variables = set(regla["variables_contribuyentes"])
+        alertas = list(regla["alertas"])
+        if outlier_ml and not regla["alertas"]:
+            variables.add("patron_atipico_ml")
+            alertas.append({
+                "tipo": "patron_atipico_ml",
+                "severidad": "advertencia",
+                "mensaje": "El modelo detectó un patrón fuera de lo común no cubierto por las reglas explícitas.",
+                "variable": "patron_atipico_ml",
+            })
+            severidad_final = peor_severidad(severidad_final, "advertencia")
+
+        es_anomalia = severidad_final != "normal" or outlier_ml
+        tipo_principal = regla["tipo_principal"] if regla["tipo_principal"] != "normal" else tipo_ml
+
+        return {
+            "es_anomalia": es_anomalia,
+            "severidad": severidad_final,
+            "tipo_principal": tipo_principal,
+            "variables_contribuyentes": sorted(variables) or ["sin_datos"],
+            "alertas": alertas,
+            "score_isolation_forest": round(score_if, 4),
+            "confianza_ml": round(confianza_ml * 100, 1),
+        }

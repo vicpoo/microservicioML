@@ -12,8 +12,9 @@ from app.core.security import verificar_api_key
 from app.models.database import SessionLocal
 from app.models.lecturas_ambientales import LecturaAmbiental
 from app.models.lotes_cafe import LoteCafe
+from app.models.retroalimentacion_ml import RetroalimentacionML
 from app.schemas.inference_response import InferenceResponse
-from app.schemas.internal_events import LecturaNuevaEvent
+from app.schemas.internal_events import LecturaNuevaEvent, ResultadoRealEvent, ResultadoRealResponse
 
 # Lo llama SOLO el Servicio Gestor, justo después de escribir una lectura en Neon.
 # No hay concepto de "dueño" que validar aquí: el Gestor es un servicio de confianza,
@@ -63,6 +64,61 @@ def procesar_lectura_nueva(evento: LecturaNuevaEvent):
             db, lote, evento.id_lote, tipo_proceso, lectura.id_sensor, features, horas_transcurridas,
             guardar_lectura=False,  # el Gestor ya la guardó, no la duplicamos
         )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        db.close()
+
+
+@router.post("/lotes/{id_lote}/resultado-real", response_model=ResultadoRealResponse, status_code=201)
+def registrar_resultado_real(id_lote: int, evento: ResultadoRealEvent):
+    """RNF-19: captura la etiqueta real que reporta el productor (vía Gestor) al finalizar el
+    secado de un lote — calidad final y tiempo real. Se guarda en retroalimentacion_ml, separada
+    del dataset sintético; scripts/train_models.py la combina al reentrenar cuando hay datos."""
+    db: Session = SessionLocal()
+    try:
+        lote = db.query(LoteCafe).filter(LoteCafe.id_lote == id_lote).first()
+        if lote is None:
+            raise HTTPException(status_code=404, detail="Lote no encontrado")
+
+        ultima = (
+            db.query(LecturaAmbiental)
+            .filter(LecturaAmbiental.id_lote == id_lote)
+            .order_by(LecturaAmbiental.timestamp.desc())
+            .first()
+        )
+        if ultima is None:
+            raise HTTPException(status_code=404, detail="No hay lecturas_ambientales para ese lote; no se puede construir el ejemplo etiquetado")
+
+        if evento.tiempo_real_horas is not None:
+            tiempo_real_horas = evento.tiempo_real_horas
+        elif lote.fecha_inicio_secado:
+            inicio = lote.fecha_inicio_secado
+            if inicio.tzinfo is None:
+                inicio = inicio.replace(tzinfo=timezone.utc)
+            tiempo_real_horas = max((datetime.now(timezone.utc) - inicio).total_seconds() / 3600.0, 0.0)
+        else:
+            raise HTTPException(status_code=422, detail="tiempo_real_horas es obligatorio: el lote no tiene fecha_inicio_secado")
+
+        registro = RetroalimentacionML(
+            id_lote=id_lote,
+            tipo_proceso=(lote.tipo_proceso or "lavado").lower(),
+            temperatura_grano=ultima.temperatura_grano,
+            temperatura_ambiental=ultima.temperatura,
+            humedad_ambiental=ultima.humedad,
+            humedad_grano=ultima.humedad_grano,
+            lluvia=ultima.lluvia,
+            luz=ultima.luz,
+            tiempo_real_horas=round(tiempo_real_horas, 2),
+            calidad_real=evento.calidad_real,
+        )
+        db.add(registro)
+        db.commit()
+        db.refresh(registro)
+        return ResultadoRealResponse(id_retroalimentacion=registro.id_retroalimentacion, mensaje="Resultado real registrado")
     except HTTPException:
         raise
     except Exception as exc:

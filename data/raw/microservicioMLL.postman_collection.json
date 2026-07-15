@@ -1,0 +1,191 @@
+{
+  "info": {
+    "name": "microservicioMLL",
+    "description": "Coleccion para probar manualmente el ML de deteccion de anomalias, prediccion de calidad/tiempo de secado y recomendaciones del microservicioMLL. Importable en Postman e Insomnia (Insomnia soporta importar colecciones Postman v2.1).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://127.0.0.1:8000", "type": "string" },
+    { "key": "internal_api_key", "value": "", "type": "string", "description": "Debe coincidir con INTERNAL_API_KEY del .env del servicio. Vacio = sin exigencia (solo desarrollo local)." },
+    { "key": "id_lote", "value": "1", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] },
+        "description": "Debe responder 200 con {\"status\": \"ok\", \"service\": \"microservicioMLL\", \"modelo_version\": \"...\"}"
+      }
+    },
+    {
+      "name": "Detectar anomalia - Normal",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Internal-Api-Key", "value": "{{internal_api_key}}" }
+        ],
+        "url": { "raw": "{{base_url}}/api/v1/anomalies/detect", "host": ["{{base_url}}"], "path": ["api", "v1", "anomalies", "detect"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id_usuario\": 1,\n  \"tipo_proceso\": \"lavado\",\n  \"lecturas\": {\n    \"temperatura_grano\": 27.0,\n    \"temperatura_ambiental\": 25.0,\n    \"humedad_ambiental\": 50.0,\n    \"humedad_grano\": 30.0,\n    \"lluvia\": 0.0,\n    \"luz\": 40000\n  },\n  \"guardar_lectura\": false\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "Se espera nivel_severidad='normal', es_anomalia=false, alerta_generada=false."
+      }
+    },
+    {
+      "name": "Detectar anomalia - Advertencia (temperatura alta)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Internal-Api-Key", "value": "{{internal_api_key}}" }
+        ],
+        "url": { "raw": "{{base_url}}/api/v1/anomalies/detect", "host": ["{{base_url}}"], "path": ["api", "v1", "anomalies", "detect"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id_usuario\": 1,\n  \"tipo_proceso\": \"lavado\",\n  \"lecturas\": {\n    \"temperatura_grano\": 36.0,\n    \"temperatura_ambiental\": 30.0,\n    \"humedad_ambiental\": 55.0,\n    \"humedad_grano\": 30.0,\n    \"lluvia\": 0.0,\n    \"luz\": 40000\n  },\n  \"guardar_lectura\": false\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "Se espera nivel_severidad='advertencia', alerta_generada=false (solo riesgo/critico alertan de verdad)."
+      }
+    },
+    {
+      "name": "Detectar anomalia - Critico (lluvia detectada, con lote)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Internal-Api-Key", "value": "{{internal_api_key}}" }
+        ],
+        "url": { "raw": "{{base_url}}/api/v1/anomalies/detect", "host": ["{{base_url}}"], "path": ["api", "v1", "anomalies", "detect"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id_usuario\": 1,\n  \"id_lote\": {{id_lote}},\n  \"tipo_proceso\": \"lavado\",\n  \"lecturas\": {\n    \"temperatura_grano\": 30.0,\n    \"temperatura_ambiental\": 26.0,\n    \"humedad_ambiental\": 70.0,\n    \"humedad_grano\": 40.0,\n    \"lluvia\": 0.9,\n    \"luz\": 5000\n  },\n  \"guardar_lectura\": true\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "Requiere que exista el lote {{id_lote}} en lotes_cafe (y que pertenezca a id_usuario=1). Se espera nivel_severidad='critico', alerta_generada=true, id_alerta con valor."
+      }
+    },
+    {
+      "name": "Detectar anomalia - Critico (sensor con valor imposible)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Internal-Api-Key", "value": "{{internal_api_key}}" }
+        ],
+        "url": { "raw": "{{base_url}}/api/v1/anomalies/detect", "host": ["{{base_url}}"], "path": ["api", "v1", "anomalies", "detect"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id_usuario\": 1,\n  \"tipo_proceso\": \"natural\",\n  \"lecturas\": {\n    \"temperatura_grano\": 105.0,\n    \"temperatura_ambiental\": 28.0,\n    \"humedad_ambiental\": 60.0,\n    \"humedad_grano\": 35.0,\n    \"lluvia\": 0.0,\n    \"luz\": 20000\n  },\n  \"guardar_lectura\": false\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "Temperatura del grano fisicamente imposible (>85C). Se espera nivel_severidad='critico', tipo_principal='valor_imposible'."
+      }
+    },
+    {
+      "name": "Detectar anomalia - id_usuario no dueno del lote (403 esperado)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Internal-Api-Key", "value": "{{internal_api_key}}" }
+        ],
+        "url": { "raw": "{{base_url}}/api/v1/anomalies/detect", "host": ["{{base_url}}"], "path": ["api", "v1", "anomalies", "detect"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id_usuario\": 999,\n  \"id_lote\": {{id_lote}},\n  \"tipo_proceso\": \"lavado\",\n  \"lecturas\": {\n    \"temperatura_grano\": 27.0,\n    \"temperatura_ambiental\": 25.0,\n    \"humedad_ambiental\": 50.0,\n    \"humedad_grano\": 30.0,\n    \"lluvia\": 0.0,\n    \"luz\": 40000\n  }\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "Prueba negativa: id_usuario que NO es dueno de {{id_lote}}. Debe responder 403."
+      }
+    },
+    {
+      "name": "Internal - Lectura nueva (disparo del Gestor)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Internal-Api-Key", "value": "{{internal_api_key}}" }
+        ],
+        "url": { "raw": "{{base_url}}/api/v1/internal/lecturas/nuevas", "host": ["{{base_url}}"], "path": ["api", "v1", "internal", "lecturas", "nuevas"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id_lote\": {{id_lote}}\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "Simula lo que hace el Servicio Gestor: avisa que hay una lectura nueva y el MLL va a leerla de lecturas_ambientales. Requiere que el lote y al menos una lectura ya existan en la BD."
+      }
+    },
+    {
+      "name": "Internal - Registrar resultado real (RNF-19)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Internal-Api-Key", "value": "{{internal_api_key}}" }
+        ],
+        "url": { "raw": "{{base_url}}/api/v1/internal/lotes/{{id_lote}}/resultado-real", "host": ["{{base_url}}"], "path": ["api", "v1", "internal", "lotes", "{{id_lote}}", "resultado-real"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"calidad_real\": \"buena\",\n  \"tiempo_real_horas\": 180.5\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "Registra la retroalimentacion real del productor al terminar el secado. Se espera 201 con id_retroalimentacion."
+      }
+    },
+    {
+      "name": "Historial - Alertas del usuario",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Internal-Api-Key", "value": "{{internal_api_key}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/v1/anomalies?id_usuario=1&limit=20",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "anomalies"],
+          "query": [
+            { "key": "id_usuario", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        },
+        "description": "Lista de alertas del usuario 1 (todos sus lotes). Agregar &id_lote={{id_lote}} para filtrar por lote."
+      }
+    },
+    {
+      "name": "Historial - Predicciones de un lote",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Internal-Api-Key", "value": "{{internal_api_key}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/v1/anomalies/{{id_lote}}/predicciones?id_usuario=1",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "anomalies", "{{id_lote}}", "predicciones"],
+          "query": [ { "key": "id_usuario", "value": "1" } ]
+        }
+      }
+    },
+    {
+      "name": "Historial - Recomendaciones de un lote",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Internal-Api-Key", "value": "{{internal_api_key}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/v1/anomalies/{{id_lote}}/recomendaciones?id_usuario=1",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "anomalies", "{{id_lote}}", "recomendaciones"],
+          "query": [ { "key": "id_usuario", "value": "1" } ]
+        }
+      }
+    }
+  ]
+}

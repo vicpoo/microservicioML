@@ -116,3 +116,27 @@ def test_historial_respeta_dueno_del_lote():
     # el lote 1 es de USUARIO_A, no de USUARIO_B
     hist_ajeno = client.get("/api/v1/anomalies", params={"id_lote": 1, "id_usuario": USUARIO_B})
     assert hist_ajeno.status_code == 403
+
+
+def test_resultado_real_retroalimentacion():
+    _seed_lotes()
+    db = SessionLocal()
+    try:
+        db.add(LecturaAmbiental(
+            id_sensor=1, id_lote=1, temperatura=25.0, humedad=55.0, humedad_grano=11.0,
+            temperatura_grano=27.0, luz=30000, lluvia=0.0,
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    payload = {"calidad_real": "buena", "tiempo_real_horas": 180.5}
+    response = client.post("/api/v1/internal/lotes/1/resultado-real", json=payload)
+    assert response.status_code == 201
+    assert response.json()["id_retroalimentacion"] > 0
+
+    resp_invalida = client.post("/api/v1/internal/lotes/1/resultado-real", json={"calidad_real": "pesima"})
+    assert resp_invalida.status_code == 422
+
+    resp_lote_inexistente = client.post("/api/v1/internal/lotes/9999/resultado-real", json=payload)
+    assert resp_lote_inexistente.status_code == 404

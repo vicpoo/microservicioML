@@ -41,7 +41,28 @@ CREATE INDEX IF NOT EXISTS ix_predicciones_lote_fecha
 CREATE INDEX IF NOT EXISTS ix_recomendaciones_lote_fecha
     ON public.recomendaciones (id_lote, fecha_generada DESC);
 
--- 5. Registrar el modelo del nuevo pipeline en modelos_ml (idempotente).
+-- 5. Tabla de retroalimentación real (RNF-19): etiquetas reales que reporta el productor al
+--    finalizar un lote (calidad_real + tiempo_real_horas), separada del dataset sintético.
+--    scripts/exportar_retroalimentacion.py la vuelca a CSV para scripts/train_models.py.
+CREATE TABLE IF NOT EXISTS public.retroalimentacion_ml (
+    id_retroalimentacion serial PRIMARY KEY,
+    id_lote integer NOT NULL,
+    tipo_proceso varchar(50) NOT NULL,
+    temperatura_grano numeric(5,2),
+    temperatura_ambiental numeric(5,2),
+    humedad_ambiental numeric(5,2),
+    humedad_grano numeric(5,2),
+    lluvia numeric(4,3),
+    luz numeric(10,2),
+    tiempo_real_horas numeric(6,2) NOT NULL,
+    calidad_real varchar(20) NOT NULL,
+    fecha_reporte timestamp DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_retroalimentacion_ml_lote
+    ON public.retroalimentacion_ml (id_lote);
+
+-- 6. Registrar el modelo del nuevo pipeline en modelos_ml (idempotente).
 --    El microservicio también hace "get-or-create" de esta fila en tiempo de arranque,
 --    esto solo la deja pre-sembrada para que predicciones.id_modelo tenga a qué apuntar
 --    incluso antes del primer arranque de la app.

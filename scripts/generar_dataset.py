@@ -11,9 +11,27 @@ y "calidad final" tengan sentido temporal/agregado por lote. Usa las MISMAS regl
 dominio (app/services/rules.py) que usará el servicio en producción, así el modelo
 aprende a generalizar esas reglas y no queda desalineado con ellas.
 
-Sensores simulados: BME280 (temperatura_ambiental, humedad_ambiental),
-DS18B20 (temperatura_grano), BH1750 (luz), FC-37 (lluvia),
-sensor capacitivo de humedad (humedad_grano). Sin anemómetro: no se genera "viento".
+Sensores simulados (5 sensores físicos reales del kit IoT, sin anemómetro):
+  - BME280       -> temperatura_ambiental, humedad_ambiental (presión no se usa: no forma
+                     parte de las reglas de dominio del Cuadro 9, ver rules.py)
+  - DS18B20      -> temperatura_grano
+  - BH1750       -> luz
+  - FC-37        -> lluvia (detección sí/no, normalizada 0-1)
+  - Sensor capacitivo -> humedad_grano
+
+Balance de clases: la simulación física genera anomalías "orgánicamente" (aplicando las
+reglas de rules.py sobre el proceso simulado), lo que arroja ~14-15% de lecturas anómalas.
+Al final se hace un submuestreo estratificado (por tipo_anomalia) para dejar el dataset de
+entrenamiento en ~90% normal / ~10% anomalía (ver rebalancear_90_10). Esto dos cosas:
+  1) da un contamination consistente para IsolationForest (train_models.py usa
+     df['_es_anomalia'].mean() como contamination), y
+  2) evita que doble prevalencia de anomalías "fáciles" (p.ej. secado_estancado) opaque a
+     los tipos raros (p.ej. valor_imposible) en el classifier supervisado.
+
+Valores nulos: cada uno de los 5 sensores puede fallar de forma independiente (paquete MQTT
+perdido, sensor desconectado) con probabilidad ~2% por lectura; el BME280 falla como unidad
+completa (nulifica temperatura_ambiental y humedad_ambiental juntos, ya que viene en un solo
+paquete I2C).
 
 Salida: data/raw/lecturas_ml_training.csv
 """
@@ -33,6 +51,8 @@ LOTES_POR_PROCESO = 24
 PASO_HORAS = 2
 
 TEMP_IDEAL_MEDIO = {"lavado": 27.0, "honey": 28.0, "natural": 30.0}
+PROB_FALLO_SENSOR = 0.02  # ~2% de probabilidad de falla por lectura, por cada sensor físico
+FRAC_ANOMALIA_OBJETIVO = 0.10  # 90% normal / 10% anomalía en el CSV final de entrenamiento
 
 
 def simular_lote(id_lote: int, tipo_proceso: str):
@@ -111,8 +131,20 @@ def simular_lote(id_lote: int, tipo_proceso: str):
             temperatura_grano = temp_grano_prev
             humedad_grano = humedad_grano_prev
 
-        # ~3% de lecturas nulas (falla de MQTT/sensor), se completan luego en limpieza
-        nulo = RNG.uniform() < 0.03
+        # --- Datos vacíos: cada uno de los 5 sensores físicos puede fallar de forma
+        # independiente (~2% por lectura). El BME280 entrega temperatura_ambiental y
+        # humedad_ambiental en el mismo paquete I2C, así que si falla se pierden ambas. ---
+        campos_nulos = []
+        if RNG.uniform() < PROB_FALLO_SENSOR:  # BME280 (temp. + hum. ambiental)
+            campos_nulos += ["temperatura_ambiental", "humedad_ambiental"]
+        if RNG.uniform() < PROB_FALLO_SENSOR:  # DS18B20 (temp. de grano)
+            campos_nulos.append("temperatura_grano")
+        if RNG.uniform() < PROB_FALLO_SENSOR:  # sensor capacitivo (humedad de grano)
+            campos_nulos.append("humedad_grano")
+        if RNG.uniform() < PROB_FALLO_SENSOR:  # BH1750 (luz)
+            campos_nulos.append("luz")
+        if RNG.uniform() < PROB_FALLO_SENSOR:  # FC-37 (lluvia)
+            campos_nulos.append("lluvia")
 
         delta_temp_reciente = abs(temperatura_grano - temp_grano_prev) if filas else 0.0
         delta_humedad_grano_24h = None
@@ -142,9 +174,8 @@ def simular_lote(id_lote: int, tipo_proceso: str):
             "_severidad": evaluacion["severidad"],
             "_tipo_anomalia": evaluacion["tipo_principal"],
         }
-        if nulo:
-            for campo in ("temperatura_grano", "humedad_ambiental"):
-                fila[campo] = np.nan
+        for campo in campos_nulos:
+            fila[campo] = np.nan
         filas.append(fila)
 
         humedad_grano_prev = humedad_grano
@@ -175,6 +206,45 @@ def asignar_calidad(df: pd.DataFrame) -> pd.DataFrame:
     return df.merge(resumen["_calidad_final_lote"], on="id_lote", how="left")
 
 
+def rebalancear_90_10(df: pd.DataFrame, frac_objetivo: float = FRAC_ANOMALIA_OBJETIVO) -> pd.DataFrame:
+    """Deja el dataset de entrenamiento en ~90% normal / ~10% anomalía.
+
+    La simulación física (reglas de dominio aplicadas sobre el proceso simulado) genera
+    anomalías de forma orgánica, sin apuntar a una proporción fija; eso da ~14-15% de
+    lecturas anómalas. Aquí se conservan TODAS las lecturas normales y se hace un
+    submuestreo ESTRATIFICADO por `_tipo_anomalia` de las anómalas, para no perder
+    representación de los tipos más raros (ej. valor_imposible) frente a los más
+    frecuentes (ej. secado_estancado).
+    """
+    normales = df[~df["_es_anomalia"]]
+    anomalas = df[df["_es_anomalia"]]
+
+    n_normal = len(normales)
+    n_anom_objetivo = int(round(n_normal * frac_objetivo / (1 - frac_objetivo)))
+
+    if n_anom_objetivo >= len(anomalas):
+        # No hay suficientes anomalías simuladas para llegar al objetivo sin repetir:
+        # se conservan todas las que hay (el dataset quedará con más de 10% de anomalías).
+        return df.sample(frac=1.0, random_state=42).reset_index(drop=True)
+
+    frac_por_tipo = n_anom_objetivo / len(anomalas)
+    anomalas_muestra = (
+        anomalas.groupby("_tipo_anomalia", group_keys=False)
+        .apply(lambda g: g.sample(frac=frac_por_tipo, random_state=42) if len(g) > 1 else g)
+    )
+    # Ajuste fino por redondeo de grupos
+    faltan = n_anom_objetivo - len(anomalas_muestra)
+    if faltan > 0:
+        restantes = anomalas.drop(anomalas_muestra.index)
+        if len(restantes) > 0:
+            anomalas_muestra = pd.concat([anomalas_muestra, restantes.sample(n=min(faltan, len(restantes)), random_state=42)])
+    elif faltan < 0:
+        anomalas_muestra = anomalas_muestra.sample(n=n_anom_objetivo, random_state=42)
+
+    df_final = pd.concat([normales, anomalas_muestra], ignore_index=False)
+    return df_final.sample(frac=1.0, random_state=42).reset_index(drop=True)
+
+
 def main():
     lotes = []
     id_lote = 1
@@ -182,21 +252,33 @@ def main():
         for _ in range(LOTES_POR_PROCESO):
             lotes.append(simular_lote(id_lote, proceso))
             id_lote += 1
-    df = pd.concat(lotes, ignore_index=True)
-    df = asignar_calidad(df)
+    df_completo = pd.concat(lotes, ignore_index=True)
+    # Calidad final se asigna con la distribución COMPLETA de cada lote (antes de rebalancear
+    # filas), para que el score de riesgo por lote no cambie por el submuestreo posterior.
+    df_completo = asignar_calidad(df_completo)
+
+    print("=== Antes de rebalancear (simulación física cruda) ===")
+    print(f"Lecturas totales: {len(df_completo):,}")
+    print(f"Anomalias: {df_completo['_es_anomalia'].sum():,} ({df_completo['_es_anomalia'].mean()*100:.1f}%)")
+
+    df = rebalancear_90_10(df_completo)
 
     out_dir = os.path.join(os.path.dirname(__file__), "..", "data", "raw")
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "lecturas_ml_training.csv")
     df.to_csv(out_path, index=False)
 
+    print("\n=== Dataset final de entrenamiento (rebalanceado 90/10) ===")
     print(f"Lecturas totales: {len(df):,}")
     print(f"Lotes simulados: {df['id_lote'].nunique()}")
+    print(f"Normal: {(~df['_es_anomalia']).sum():,} ({(~df['_es_anomalia']).mean()*100:.1f}%)")
     print(f"Anomalias: {df['_es_anomalia'].sum():,} ({df['_es_anomalia'].mean()*100:.1f}%)")
     print("\nDistribucion severidad:")
     print(df["_severidad"].value_counts().to_string())
     print("\nDistribucion tipo_anomalia:")
     print(df["_tipo_anomalia"].value_counts().to_string())
+    print("\nValores nulos por columna:")
+    print(df[["temperatura_grano", "temperatura_ambiental", "humedad_ambiental", "humedad_grano", "lluvia", "luz"]].isna().sum().to_string())
     print("\nCalidad final por lote:")
     print(df.drop_duplicates("id_lote")["_calidad_final_lote"].value_counts().to_string())
     print(f"\nGuardado en {out_path}")

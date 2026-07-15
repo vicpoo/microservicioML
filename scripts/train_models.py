@@ -27,6 +27,7 @@ from sklearn.preprocessing import OneHotEncoder
 
 HERE = os.path.dirname(__file__)
 RAW_CSV = os.path.join(HERE, "..", "data", "raw", "lecturas_ml_training.csv")
+RETRO_CSV = os.path.join(HERE, "..", "data", "raw", "retroalimentacion_real.csv")
 PROCESSED_CSV = os.path.join(HERE, "..", "data", "processed", "lecturas_limpias.csv")
 ARTIFACTS_DIR = os.path.join(HERE, "..", "app", "ml", "artifacts")
 
@@ -44,6 +45,20 @@ CATEGORICAL_FEATURES = ["tipo_proceso"]
 
 def cargar_y_limpiar() -> pd.DataFrame:
     df = pd.read_csv(RAW_CSV)
+
+    # RNF-19: si hay resultados reales reportados por productores (ver
+    # scripts/exportar_retroalimentacion.py), se combinan con el dataset sintético.
+    if os.path.exists(RETRO_CSV):
+        df_real = pd.read_csv(RETRO_CSV)
+    else:
+        df_real = pd.DataFrame()
+    if not df_real.empty:
+        print(f"Combinando {len(df_real)} lecturas reales de retroalimentacion_ml (RNF-19) con el dataset sintético.")
+        df = pd.concat([df, df_real], ignore_index=True)
+    else:
+        print("Sin datos reales de retroalimentación todavía (RNF-19); entrenando solo con dataset sintético. "
+              "Corre scripts/exportar_retroalimentacion.py cuando haya lotes finalizados reportados por productores.")
+
     df = df.dropna(subset=["tipo_proceso", "id_lote"])
     for col in ["temperatura_grano", "temperatura_ambiental", "humedad_ambiental", "humedad_grano", "lluvia", "luz"]:
         mediana = df[col].median()

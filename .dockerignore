@@ -11,6 +11,10 @@ ML/.ipynb_checkpoints/
 ML/README.md
 ML/definicion_problema_kajve.md
 
+# Doc de NLP/ (no se importa en runtime). No hay .ipynb que excluir aqui -- todos los .py de
+# NLP/ (incluyendo entrenar_clasificador_texto.py y preparar_datos_clasificador.py) viajan.
+NLP/README.md
+
 # Scripts de entrenamiento/recoleccion offline -- confirmado que nada bajo app/ los importa.
 scripts/
 

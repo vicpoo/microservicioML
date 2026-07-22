@@ -27,6 +27,7 @@ ENV/
 *.h5
 *.keras
 *.ckpt
+*firebase-adminsdk*.json
 
 # Carpeta de artefactos
 app/ml/artifacts/

@@ -20,6 +20,11 @@ COPY app/ ./app/
 # arranque, no solo al llamar /internal/monitoreo/salud); esa cadena de imports necesita
 # ML/entrenamiento.py, ML/evaluacion.py y ML/prediccion_lluvia_ga.py o el proceso no levanta.
 COPY ML/ ./ML/
+# app/api/routes/nlp.py y app/api/routes/history.py (ambas importadas por main.py en el
+# arranque) importan NLP.clasificar_texto / NLP.buscar_reportes / NLP.generar_reporte /
+# NLP.recopilar_datos_reporte / NLP.registrar_reporte a nivel de modulo -- sin esta carpeta
+# el proceso tampoco levanta.
+COPY NLP/ ./NLP/
 
 EXPOSE 8000
 

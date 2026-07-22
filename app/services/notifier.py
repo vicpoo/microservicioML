@@ -8,10 +8,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models.alertas import Alerta
+from app.models.dispositivos_usuario import DispositivoUsuario
 from app.models.inferencias_ml import InferenciaML
+from app.models.lotes_cafe import LoteCafe
 from app.models.modelos_ml import ModeloML
 from app.models.predicciones import Prediccion
 from app.models.recomendaciones import Recomendacion
+from app.services import fcm
 
 settings = get_settings()
 
@@ -56,9 +59,14 @@ def registrar_inferencia(
     severidad: str,
     mensaje: str,
 ) -> int:
+    # OJO: inferencias_ml es una tabla LEGADO de un prototipo de clustering anterior a
+    # este pipeline (ver definicion_problema_kajve.md). Su columna `humedad` es
+    # NOT NULL en el esquema real, pero ya no existe humedad_ambiental como variable
+    # (BMP280, no BME280). Se manda None: hace falta correr la migración que quita
+    # ese NOT NULL (ver migration.sql) antes de que este INSERT funcione contra Neon.
     registro = InferenciaML(
         temperatura=features["temperatura_ambiental"],
-        humedad=features["humedad_ambiental"],
+        humedad=None,
         cluster_id=SEVERITY_RANK.get(severidad, 0),
         cluster_nombre=severidad,
         recomendacion=mensaje,
@@ -94,6 +102,7 @@ def registrar_recomendaciones(db: Session, id_lote: int, recomendaciones: List[D
 def registrar_prediccion(
     db: Session, id_lote: int, id_modelo: int, tiempo_estimado_horas: Optional[float],
     calidad_estimada: Optional[str], confianza: Optional[float],
+    riesgo_lluvia_proxima: Optional[bool] = None, horas_anticipacion_lluvia: Optional[int] = None,
 ) -> None:
     db.add(Prediccion(
         id_lote=id_lote,
@@ -101,8 +110,24 @@ def registrar_prediccion(
         tiempo_estimado_horas=tiempo_estimado_horas,
         calidad_estimada=calidad_estimada,
         confianza=confianza,
+        riesgo_lluvia_proxima=riesgo_lluvia_proxima,
+        horas_anticipacion_lluvia=horas_anticipacion_lluvia,
     ))
     db.commit()
+
+
+def ultimo_riesgo_lluvia(db: Session, id_lote: int) -> Optional[bool]:
+    """Último valor conocido de riesgo_lluvia_proxima para este lote (antes de registrar la
+    predicción nueva) -- lo usa inference.py para mandar el push de "riesgo de lluvia" solo
+    cuando el riesgo pasa de False/None a True, no en cada lectura mientras se mantenga True
+    (si no, un lote con riesgo sostenido por horas mandaría un push cada 30s con el poller)."""
+    anterior = (
+        db.query(Prediccion)
+        .filter(Prediccion.id_lote == id_lote, Prediccion.riesgo_lluvia_proxima.isnot(None))
+        .order_by(Prediccion.fecha_prediccion.desc())
+        .first()
+    )
+    return anterior.riesgo_lluvia_proxima if anterior is not None else None
 
 
 def _debe_notificar_email(severidad: str) -> bool:
@@ -141,3 +166,68 @@ def enviar_email_alerta(id_lote: Optional[int], severidad: str, mensaje: str, re
     except Exception as exc:  # pragma: no cover - dependemos de red/credenciales reales
         print(f"[notifier] No se pudo enviar el correo de alerta: {exc}")
         return False
+
+
+def _debe_notificar_push(severidad: str) -> bool:
+    if not settings.fcm_enabled:
+        return False
+    minimo = SEVERITY_RANK.get(settings.fcm_min_severidad, 2)
+    return SEVERITY_RANK.get(severidad, 0) >= minimo
+
+
+def enviar_push_alerta(
+    db: Session, id_lote: Optional[int], severidad: str, mensaje: str,
+    titulo: Optional[str] = None, datos_extra: Optional[Dict[str, str]] = None,
+) -> bool:
+    """Envía notificación push (FCM) al dueño del lote, si la severidad lo amerita.
+
+    Sigue la MISMA cadena de aislamiento por usuario que el resto del sistema:
+    id_lote -> lotes_cafe.id_usuario -> dispositivos_usuario.id_usuario -- nunca manda la alerta
+    a todos los dispositivos registrados, solo a los del dueño real de ESE lote (ver
+    definicion_problema_kajve.md, Sección 5: RLS no protege este camino, hay que filtrar
+    explícitamente en código, que es justo lo que hace este query).
+
+    `titulo`: texto corto para el título de la notificación (ej. "Exceso de temperatura", ver
+    rules.titulo_corto_para). Si no se manda, cae al formato genérico anterior.
+    `datos_extra`: se mezcla en el payload `data` del push -- ahí va, entre otras cosas, el
+    texto completo de la recomendación, para que la app móvil arme "alerta + recomendación" en
+    una sola vista sin tener que llamar a otro endpoint.
+
+    No lanza excepción si falla: la alerta ya quedó guardada en alertas/BD de todas formas."""
+    if not _debe_notificar_push(severidad) or id_lote is None:
+        return False
+
+    lote = db.query(LoteCafe).filter(LoteCafe.id_lote == id_lote).first()
+    if lote is None:
+        return False
+
+    dispositivos = (
+        db.query(DispositivoUsuario)
+        .filter(DispositivoUsuario.id_usuario == lote.id_usuario, DispositivoUsuario.activo.is_(True))
+        .all()
+    )
+    tokens = [d.fcm_token for d in dispositivos]
+    if not tokens:
+        return False
+
+    datos = {"id_lote": str(id_lote), "severidad": severidad}
+    datos.update(datos_extra or {})
+
+    resultado = fcm.enviar_push(
+        tokens,
+        titulo=titulo or f"Alerta {severidad.upper()} - {lote.nombre_lote}",
+        cuerpo=mensaje,
+        datos=datos,
+    )
+
+    # Limpieza automática: si FCM reporta un token como no-registrado/inválido (app
+    # desinstalada, token rotado sin que el usuario haya vuelto a abrir la app), se desactiva
+    # en vez de seguir intentando mandarle notificaciones que nunca van a llegar.
+    if resultado["tokens_invalidos"]:
+        db.query(DispositivoUsuario).filter(
+            DispositivoUsuario.id_usuario == lote.id_usuario,
+            DispositivoUsuario.fcm_token.in_(resultado["tokens_invalidos"]),
+        ).update({"activo": False}, synchronize_session=False)
+        db.commit()
+
+    return resultado["enviados"] > 0

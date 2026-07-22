@@ -15,7 +15,13 @@ class InferenceRequest(BaseModel):
     tipo_proceso: Optional[str] = Field(default=None, description="lavado, honey o natural (se ignora si id_lote resuelve un lote existente)")
     id_sensor: Optional[int] = Field(default=None, description="Sensor de origen, si se conoce")
     timestamp: Optional[str] = None
-    # Claves esperadas: temperatura_grano (DS18B20), temperatura_ambiental y humedad_ambiental (BME280),
-    # humedad_grano (sensor capacitivo), lluvia (FC-37, normalizado 0-1), luz (BH1750, lux)
+    # Claves esperadas: temperatura_grano (DS18B20), temperatura_ambiental (BMP280),
+    # humedad_grano (sensor capacitivo, crudo si no está calibrado), lluvia (FC-37,
+    # 1.0/0.0 resuelto desde lluvia_detectada), luz (BH1750, lux).
+    # Opcional: presion_hpa (BMP280) -- si se manda, activa la predicción de riesgo de lluvia
+    # del Algoritmo Genético (ver app/services/rain_predictor.py); si no viene, esa predicción
+    # simplemente queda en None, el resto del pipeline sigue igual.
+    # NOTA: ya no existe humedad_ambiental (el hardware real es BMP280, no BME280;
+    # ver definicion_problema_kajve.md Sección 4.1).
     lecturas: Dict[str, float]
     guardar_lectura: bool = Field(default=True, description="Si True, persiste la lectura cruda en lecturas_ambientales")

@@ -1,2 +1,0 @@
-id_modelo,nombre,version,tipo,rmse,activo,fecha_entrenamiento
-1,IsolationForest Anomalias Secado,1.0.0,anomalia,,True,2026-06-01 06:00:00

@@ -19,6 +19,8 @@ def init_db() -> None:
     # Importa todos los modelos para que queden registrados en Base.metadata
     from app.models import (  # noqa: F401
         alertas,
+        dispositivos_usuario,
+        estado_polling,
         inferencias_ml,
         lecturas_ambientales,
         lotes_cafe,

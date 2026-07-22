@@ -28,6 +28,31 @@ class Settings(BaseSettings):
     # Severidad mínima que dispara correo: advertencia | riesgo | critico
     email_min_severidad: str = "riesgo"
 
+    # --- Notificaciones push (FCM, paso 11: despliegue) ---
+    # Requiere un service account JSON de un proyecto Firebase (Firebase Console >
+    # Configuración del proyecto > Cuentas de servicio > Generar nueva clave privada).
+    # Si fcm_enabled=False (default) o falta la ruta de credenciales, notifier.enviar_push_alerta
+    # no hace nada y no lanza excepción -- mismo patrón que el envío de correo.
+    fcm_enabled: bool = False
+    fcm_credentials_path: Optional[str] = None
+    # Severidad mínima que dispara push: advertencia | riesgo | critico. A diferencia del
+    # correo (que solo avisa en riesgo/critico para no saturar), el push por defecto dispara
+    # desde "advertencia" -- o sea, en CUALQUIER anomalía que el ML detecte, no solo las
+    # graves (ver app/api/routes/inference.py::ejecutar_pipeline, el push ya no depende de
+    # que se haya generado una alerta formal).
+    fcm_min_severidad: str = "advertencia"
+
+    # --- Polling en tiempo real (paso 12: monitoreo) ---
+    # El disparador normal es que el Gestor llame POST /internal/lecturas/nuevas apenas
+    # inserta una lectura. Este poller es una RED DE SEGURIDAD: revisa lecturas_ambientales
+    # cada polling_intervalo_segundos por si algo se coló sin avisar (Gestor caído, bug de
+    # red, etc.), así el servicio sigue siendo "tiempo real" aunque el webhook falle. Usa un
+    # cursor compartido (tabla ml_estado_polling) con el webhook para no procesar la misma
+    # lectura dos veces -- ver app/services/poller.py.
+    polling_enabled: bool = True
+    polling_intervalo_segundos: int = 30
+    polling_batch_size: int = 50
+
     # --- Seguridad entre servicios ---
     # El MLL es un servicio interno: solo lo llaman el Servicio Gestor (para avisarle de
     # lecturas nuevas) y, si tu API móvil decide consultarlo en vez de leer Neon directo,

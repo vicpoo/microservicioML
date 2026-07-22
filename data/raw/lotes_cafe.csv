@@ -1,5 +1,0 @@
-id_lote,id_usuario,id_sensor,nombre_lote,variedad,peso_kg,ubicacion,codigo_qr,estado,fecha_inicio_secado,fecha_fin_secado,linked_at,created_at
-1,2,1,Lote Lavado Jun-2026,Arabica Lavado,320.0,"Finca El Osil #1, Chiapas",KAJVE-QR-0001-a71600e6,en_proceso,2026-06-01 06:00:00,,2026-06-01 04:00:00,2026-05-31 06:00:00
-2,3,2,Lote Honey Jun-2026,Arabica Honey,280.5,"Finca El Osil #2, Chiapas",KAJVE-QR-0002-852f3755,en_proceso,2026-06-03 06:00:00,,2026-06-03 04:00:00,2026-06-02 06:00:00
-3,4,3,Lote Natural Jun-2026,Typica Natural,350.0,"Finca El Osil #3, Chiapas",KAJVE-QR-0003-68215238,en_proceso,2026-06-05 06:00:00,,2026-06-05 04:00:00,2026-06-04 06:00:00
-4,2,4,Lote Lavado Altura,Geisha Lavado,150.0,"Finca El Osil #4, Chiapas",KAJVE-QR-0004-61983885,en_proceso,2026-06-07 06:00:00,,2026-06-07 04:00:00,2026-06-06 06:00:00

@@ -2,6 +2,7 @@
 # Carpeta: microservicioMLL/app/services/
 # (pega/reemplaza este archivo en esa ruta dentro de tu proyecto)
 
+import logging
 import os
 from typing import Dict, Optional, Tuple
 
@@ -9,6 +10,8 @@ import joblib
 import pandas as pd
 
 from app.services.rules import TIPO_SEVERIDAD_DEFAULT, evaluar_lectura, peor_severidad
+
+logger = logging.getLogger(__name__)
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(__file__), "..", "ml", "artifacts")
 
@@ -37,7 +40,6 @@ class AnomalyDetector:
             "tipo_proceso": tipo_proceso,
             "temperatura_grano": features["temperatura_grano"],
             "temperatura_ambiental": features["temperatura_ambiental"],
-            "humedad_ambiental": features["humedad_ambiental"],
             "humedad_grano": features["humedad_grano"],
             "lluvia": features["lluvia"],
             "luz": features["luz"],
@@ -49,34 +51,43 @@ class AnomalyDetector:
         tipo_proceso: str,
         features: Dict[str, float],
         delta_temp_reciente: Optional[float] = None,
-        delta_humedad_grano_24h: Optional[float] = None,
+        delta_humedad_grano_24h_pct: Optional[float] = None,
     ) -> Dict:
         tipo_proceso = (tipo_proceso or "lavado").lower()
 
         regla = evaluar_lectura(
             tipo_proceso, features,
             delta_temp_reciente=delta_temp_reciente,
-            delta_humedad_grano_24h=delta_humedad_grano_24h,
+            delta_humedad_grano_24h_pct=delta_humedad_grano_24h_pct,
         )
 
         fila = self._fila_ml(tipo_proceso, features)
 
+        # Igual que en predictor.py: un artefacto viejo/incompatible no debe tumbar la
+        # detección completa -- las reglas de dominio (evaluar_lectura, arriba) siguen
+        # funcionando solas si el RandomForest/IsolationForest fallan por cualquier motivo.
         tipo_ml, confianza_ml = "normal", 0.0
         if self.rf_tipo is not None:
-            pipe = self.rf_tipo["modelo"]
-            proba = pipe.predict_proba(fila)[0]
-            clases = pipe.named_steps["clf"].classes_
-            idx = proba.argmax()
-            tipo_ml, confianza_ml = clases[idx], float(proba[idx])
+            try:
+                pipe = self.rf_tipo["modelo"]
+                proba = pipe.predict_proba(fila)[0]
+                clases = pipe.named_steps["clf"].classes_
+                idx = proba.argmax()
+                tipo_ml, confianza_ml = clases[idx], float(proba[idx])
+            except Exception as exc:
+                logger.warning(f"[anomaly_detector] rf_tipo_anomalia.joblib incompatible/con error, se usan solo las reglas: {exc}")
 
         outlier_ml = False
         score_if = 0.0
         if self.isolation is not None:
-            modelo_if = self.isolation["modelo"]
-            cols = self.isolation["features"]
-            fila_if = fila[cols]
-            outlier_ml = bool(modelo_if.predict(fila_if)[0] == -1)
-            score_if = float(modelo_if.decision_function(fila_if)[0])
+            try:
+                modelo_if = self.isolation["modelo"]
+                cols = self.isolation["features"]
+                fila_if = fila[cols]
+                outlier_ml = bool(modelo_if.predict(fila_if)[0] == -1)
+                score_if = float(modelo_if.decision_function(fila_if)[0])
+            except Exception as exc:
+                logger.warning(f"[anomaly_detector] isolation_forest.joblib incompatible/con error, se omite el score de outlier: {exc}")
 
         # Las reglas (umbrales exactos del PDF) son la fuente autoritativa cuando SÍ detectan
         # algo: dan una severidad graduada y precisa. El RandomForest solo puede ELEVAR la

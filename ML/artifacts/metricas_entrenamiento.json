@@ -1,0 +1,77 @@
+{
+  "isolation_forest": {
+    "features": [
+      "temperatura_grano",
+      "temperatura_ambiental",
+      "humedad_grano",
+      "lluvia",
+      "luz",
+      "delta_temp"
+    ],
+    "medianas_relleno": {
+      "temperatura_grano": 31.06,
+      "temperatura_ambiental": 21.54,
+      "humedad_grano": 4095.0,
+      "lluvia": 0.0,
+      "luz": 0.0,
+      "delta_temp": 9.21
+    },
+    "contamination": 0.02,
+    "tasa_outliers_en_train": 0.01787629603146228,
+    "n_filas_train": 5594
+  },
+  "rf_tipo_anomalia": {
+    "features": [
+      "tipo_proceso",
+      "temperatura_grano",
+      "temperatura_ambiental",
+      "humedad_grano",
+      "lluvia",
+      "luz",
+      "delta_temp"
+    ],
+    "medianas_relleno": {
+      "temperatura_grano": 31.06,
+      "temperatura_ambiental": 21.54,
+      "humedad_grano": 4095.0,
+      "lluvia": 0.0,
+      "luz": 0.0,
+      "delta_temp": 9.21
+    },
+    "clases": [
+      "lluvia_detectada",
+      "normal",
+      "temperatura_alta"
+    ],
+    "accuracy_ajuste_train": 1.0,
+    "n_filas_train": 5594
+  },
+  "ga_lluvia": {
+    "mejor_individuo": {
+      "presion_hpa": -0.026683338323679306,
+      "luz": -0.01858601129095816,
+      "lluvia_eventos_24h": 1.1270120552375753,
+      "horas_desde_ultima_lluvia": 0.14345610475215076,
+      "bias": -0.053021197886092386
+    },
+    "features": [
+      "presion_hpa",
+      "luz",
+      "lluvia_eventos_24h",
+      "horas_desde_ultima_lluvia"
+    ],
+    "horas_anticipacion": 3,
+    "metrica_fitness": "f1",
+    "f1_ajuste_train": 1.0,
+    "n_filas_train": 3461
+  },
+  "rf_tiempo_restante": {
+    "omitido": "solo 0 lote(s) en train con horas_restantes conocida (lote finalizado con fecha_fin_secado); se necesitan al menos 5.",
+    "n_lotes_disponibles": 0
+  },
+  "rf_calidad": {
+    "omitido": "la columna _calidad_final_lote no existe en este dataset (la tabla retroalimentacion_ml de Neon sigue vacía / sin migrar; ver migration.sql)."
+  },
+  "fecha_entrenamiento": "2026-07-22T03:38:46.759204+00:00",
+  "n_filas_train_total": 5594
+}

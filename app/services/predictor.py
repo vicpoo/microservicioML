@@ -1,9 +1,12 @@
 #app/services/predictor.py
+import logging
 import os
 from typing import Dict, Optional
 
 import joblib
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(__file__), "..", "ml", "artifacts")
 
@@ -33,7 +36,6 @@ class Predictor:
             "tipo_proceso": tipo_proceso,
             "temperatura_grano": features["temperatura_grano"],
             "temperatura_ambiental": features["temperatura_ambiental"],
-            "humedad_ambiental": features["humedad_ambiental"],
             "humedad_grano": features["humedad_grano"],
             "lluvia": features["lluvia"],
             "luz": features["luz"],
@@ -45,19 +47,31 @@ class Predictor:
         tipo_proceso = (tipo_proceso or "lavado").lower()
         fila = self._fila(tipo_proceso, features, horas_transcurridas)
 
+        # Cada predicción se envuelve en su propio try/except: un artefacto viejo/incompatible
+        # (p. ej. entrenado con un esquema de columnas anterior) no debe tumbar TODA la
+        # respuesta de /detect -- las demás salidas (anomalías, recomendaciones) siguen siendo
+        # útiles aunque esta predicción en particular no esté disponible. Se loguea para que el
+        # equipo note que hay que reentrenar/reemplazar ese artefacto, en vez de fallar en
+        # silencio de forma permanente.
         tiempo_estimado_horas = None
         if self.rf_tiempo is not None:
-            pred = float(self.rf_tiempo["modelo"].predict(fila)[0])
-            tiempo_estimado_horas = round(max(pred, 0.0), 1)
+            try:
+                pred = float(self.rf_tiempo["modelo"].predict(fila)[0])
+                tiempo_estimado_horas = round(max(pred, 0.0), 1)
+            except Exception as exc:
+                logger.warning(f"[predictor] rf_tiempo_restante.joblib incompatible/con error, se omite tiempo_estimado_horas: {exc}")
 
         calidad_estimada, confianza_calidad = None, None
         if self.rf_calidad is not None:
-            pipe = self.rf_calidad["modelo"]
-            proba = pipe.predict_proba(fila)[0]
-            clases = pipe.named_steps["clf"].classes_
-            idx = proba.argmax()
-            calidad_estimada = str(clases[idx])
-            confianza_calidad = round(float(proba[idx]) * 100, 1)
+            try:
+                pipe = self.rf_calidad["modelo"]
+                proba = pipe.predict_proba(fila)[0]
+                clases = pipe.named_steps["clf"].classes_
+                idx = proba.argmax()
+                calidad_estimada = str(clases[idx])
+                confianza_calidad = round(float(proba[idx]) * 100, 1)
+            except Exception as exc:
+                logger.warning(f"[predictor] rf_calidad.joblib incompatible/con error, se omite calidad_estimada: {exc}")
 
         return {
             "tiempo_estimado_horas": tiempo_estimado_horas,

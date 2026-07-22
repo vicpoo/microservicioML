@@ -1,5 +1,5 @@
 #app/models/predicciones.py
-from sqlalchemy import Column, DateTime, Integer, Numeric, String
+from sqlalchemy import Boolean, Column, DateTime, Integer, Numeric, SmallInteger, String
 from sqlalchemy.sql import func
 
 from app.models.database import Base
@@ -15,4 +15,9 @@ class Prediccion(Base):
     tiempo_estimado_horas = Column(Numeric(5, 2), nullable=True)
     calidad_estimada = Column(String(50), nullable=True)
     confianza = Column(Numeric(5, 2), nullable=True)
+    # Salida del Algoritmo Genético (paso 7/11, app/services/rain_predictor.py) -- riesgo de
+    # que llueva en las próximas horas_anticipacion_lluvia horas, no si está lloviendo ahora
+    # (eso ya lo cubre el sensor FC-37 vía las reglas/alertas normales).
+    riesgo_lluvia_proxima = Column(Boolean, nullable=True)
+    horas_anticipacion_lluvia = Column(SmallInteger, nullable=True)
     fecha_prediccion = Column(DateTime, server_default=func.now())

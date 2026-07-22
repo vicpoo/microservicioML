@@ -1,5 +1,0 @@
-id_sensor,mac_address,id_cola_mqtt,provisioning_token,token_usado,tipo,modelo,estado,fecha_registro,ultima_conexion
-1,16:c6:a7:70:6e:db,sensors/esp32-001/data,1a74f6cd-c4eb-4ac4-b23c-55f12813b314,True,ambos,BME280+DS18B20,activo,2026-02-16 06:00:00,2026-06-09 06:00:00
-2,16:b2:33:18:86:f9,sensors/esp32-002/data,a03486de-555a-4235-be39-a27a184b7974,True,ambos,BME280+DS18B20,activo,2026-02-11 06:00:00,2026-06-09 06:00:00
-3,bc:c2:b7:c9:83:20,sensors/esp32-003/data,32304a07-5441-41ed-8788-0de244a4f09a,True,ambos,BME280+DS18B20,activo,2026-02-06 06:00:00,2026-06-09 06:00:00
-4,d6:73:80:5e:2e:ed,sensors/esp32-004/data,5ac70a8c-33c5-4a45-ba64-dbd6ad2e45e2,True,ambos,BME280+DS18B20,activo,2026-02-01 06:00:00,2026-06-09 06:00:00

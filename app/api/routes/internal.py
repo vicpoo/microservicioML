@@ -3,6 +3,7 @@
 # (pega/reemplaza este archivo en esa ruta dentro de tu proyecto)
 
 from datetime import datetime, timezone
+from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -15,6 +16,9 @@ from app.models.lotes_cafe import LoteCafe
 from app.models.retroalimentacion_ml import RetroalimentacionML
 from app.schemas.inference_response import InferenceResponse
 from app.schemas.internal_events import LecturaNuevaEvent, ResultadoRealEvent, ResultadoRealResponse
+from app.services import poller
+from app.services.lectura_utils import calcular_horas_transcurridas, construir_features
+from ML import monitoreo
 
 # Lo llama SOLO el Servicio Gestor, justo después de escribir una lectura en Neon.
 # No hay concepto de "dueño" que validar aquí: el Gestor es un servicio de confianza,
@@ -42,28 +46,20 @@ def procesar_lectura_nueva(evento: LecturaNuevaEvent):
             raise HTTPException(status_code=404, detail="No hay lecturas para ese lote en lecturas_ambientales")
 
         tipo_proceso = (lote.tipo_proceso or "lavado").lower()
-        if lote.fecha_inicio_secado:
-            inicio = lote.fecha_inicio_secado
-            if inicio.tzinfo is None:
-                inicio = inicio.replace(tzinfo=timezone.utc)
-            horas_transcurridas = max((datetime.now(timezone.utc) - inicio).total_seconds() / 3600.0, 0.0)
-        else:
-            horas_transcurridas = 0.0
+        horas_transcurridas = calcular_horas_transcurridas(lote)
+        features = construir_features(lectura)
 
-        features = {
-            "temperatura_grano": float(lectura.temperatura_grano) if lectura.temperatura_grano is not None else 0.0,
-            "temperatura_ambiental": float(lectura.temperatura) if lectura.temperatura is not None else 0.0,
-            "humedad_ambiental": float(lectura.humedad) if lectura.humedad is not None else 0.0,
-            "humedad_grano": float(lectura.humedad_grano) if lectura.humedad_grano is not None else 0.0,
-            "lluvia": float(lectura.lluvia) if lectura.lluvia is not None else 0.0,
-            "luz": float(lectura.luz) if lectura.luz is not None else 0.0,
-        }
-        features["delta_temp"] = features["temperatura_grano"] - features["temperatura_ambiental"]
-
-        return ejecutar_pipeline(
+        presion_hpa = float(lectura.presion_hpa) if lectura.presion_hpa is not None else None
+        respuesta = ejecutar_pipeline(
             db, lote, evento.id_lote, tipo_proceso, lectura.id_sensor, features, horas_transcurridas,
             guardar_lectura=False,  # el Gestor ya la guardó, no la duplicamos
+            presion_hpa=presion_hpa,
         )
+        # Avanza el cursor compartido con app/services/poller.py: esta lectura ya se procesó
+        # por el webhook, así que cuando el poller le toque revisar este rango la salta (si
+        # no, la volvería a procesar y duplicaría predicción/alerta/push para el mismo dato).
+        poller.marcar_procesada(db, lectura.id_lectura)
+        return respuesta
     except HTTPException:
         raise
     except Exception as exc:
@@ -108,9 +104,8 @@ def registrar_resultado_real(id_lote: int, evento: ResultadoRealEvent):
             tipo_proceso=(lote.tipo_proceso or "lavado").lower(),
             temperatura_grano=ultima.temperatura_grano,
             temperatura_ambiental=ultima.temperatura,
-            humedad_ambiental=ultima.humedad,
             humedad_grano=ultima.humedad_grano,
-            lluvia=ultima.lluvia,
+            lluvia_detectada=ultima.lluvia_detectada,
             luz=ultima.luz,
             tiempo_real_horas=round(tiempo_real_horas, 2),
             calidad_real=evento.calidad_real,
@@ -124,5 +119,18 @@ def registrar_resultado_real(id_lote: int, evento: ResultadoRealEvent):
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        db.close()
+
+
+@router.get("/monitoreo/salud")
+def salud_modelos(dias_alertas: int = 7) -> Dict[str, Any]:
+    """Paso 12 (monitoreo y reentrenamiento): compara predicciones ya hechas contra la
+    retroalimentación real reportada por productores, vigila la tasa de alertas reciente, y
+    dice si ya hay datos suficientes para reentrenar -- ver ML/monitoreo.py para el detalle de
+    cada métrica. Pensado para un cron/dashboard del Gestor, no para la app móvil."""
+    db: Session = SessionLocal()
+    try:
+        return monitoreo.resumen_salud(db, dias_alertas=dias_alertas)
     finally:
         db.close()

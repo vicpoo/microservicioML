@@ -1,6 +1,5 @@
 # Archivo: tests/test_api.py
 # Carpeta: microservicioMLL/tests/
-# (pega/reemplaza este archivo en esa ruta dentro de tu proyecto)
 
 from fastapi.testclient import TestClient
 
@@ -21,7 +20,7 @@ def _seed_lotes():
     try:
         if db.query(LoteCafe).filter(LoteCafe.id_lote == 1).first():
             return
-        db.add(Sensor(id_sensor=1, mac_address="AA:BB:CC:00:00:01", tipo="ambos", modelo="BME280+DS18B20"))
+        db.add(Sensor(id_sensor=1, mac_address="AA:BB:CC:00:00:01", tipo="ambos", modelo="BMP280+DS18B20"))
         db.add(LoteCafe(
             id_lote=1, id_usuario=USUARIO_A, id_sensor=1, nombre_lote="Lote de A",
             codigo_qr="QR-TEST-1", tipo_proceso="lavado",
@@ -46,7 +45,7 @@ def test_detect_anomaly_sin_lote():
         "tipo_proceso": "lavado",
         "lecturas": {
             "temperatura_grano": 27.0, "temperatura_ambiental": 25.0,
-            "humedad_ambiental": 50.0, "humedad_grano": 30.0, "lluvia": 0.0, "luz": 40000,
+            "humedad_grano": 30.0, "lluvia": 0.0, "luz": 40000,
         },
     }
     response = client.post("/api/v1/anomalies/detect", json=payload)
@@ -63,7 +62,7 @@ def test_detect_anomaly_critica_con_lote():
         "tipo_proceso": "lavado",
         "lecturas": {
             "temperatura_grano": 30.0, "temperatura_ambiental": 26.0,
-            "humedad_ambiental": 70.0, "humedad_grano": 40.0, "lluvia": 0.9, "luz": 5000,
+            "humedad_grano": 40.0, "lluvia": 0.9, "luz": 5000,
         },
     }
     response = client.post("/api/v1/anomalies/detect", json=payload)
@@ -76,7 +75,7 @@ def test_detect_anomaly_critica_con_lote():
     # advertencia leve: NO debe generar alerta (solo riesgo/critico alertan)
     payload_leve = dict(payload, lecturas={
         "temperatura_grano": 36.0, "temperatura_ambiental": 30.0,
-        "humedad_ambiental": 55.0, "humedad_grano": 30.0, "lluvia": 0.0, "luz": 40000,
+        "humedad_grano": 30.0, "lluvia": 0.0, "luz": 40000,
     })
     resp_leve = client.post("/api/v1/anomalies/detect", json=payload_leve)
     assert resp_leve.status_code == 200
@@ -89,8 +88,8 @@ def test_gestor_dispara_pipeline_via_endpoint_interno():
     db = SessionLocal()
     try:
         db.add(LecturaAmbiental(
-            id_sensor=1, id_lote=1, temperatura=26.0, humedad=70.0, humedad_grano=40.0,
-            temperatura_grano=30.0, luz=5000, lluvia=0.9,
+            id_sensor=1, id_lote=1, temperatura=26.0, humedad_grano=40,
+            temperatura_grano=30.0, luz=5000, lluvia_detectada=True,
         ))
         db.commit()
     finally:
@@ -123,8 +122,8 @@ def test_resultado_real_retroalimentacion():
     db = SessionLocal()
     try:
         db.add(LecturaAmbiental(
-            id_sensor=1, id_lote=1, temperatura=25.0, humedad=55.0, humedad_grano=11.0,
-            temperatura_grano=27.0, luz=30000, lluvia=0.0,
+            id_sensor=1, id_lote=1, temperatura=25.0, humedad_grano=11,
+            temperatura_grano=27.0, luz=30000, lluvia_detectada=False,
         ))
         db.commit()
     finally:

@@ -1,5 +1,5 @@
 #app/models/retroalimentacion_ml.py
-from sqlalchemy import Column, DateTime, Integer, Numeric, String
+from sqlalchemy import Boolean, Column, DateTime, Integer, Numeric, SmallInteger, String
 from sqlalchemy.sql import func
 
 from app.models.database import Base
@@ -8,12 +8,19 @@ from app.models.database import Base
 class RetroalimentacionML(Base):
     """Resultado real de un lote, reportado por el productor/Gestor al finalizar el secado (RNF-19).
 
-    Cada fila es un ejemplo etiquetado con el mismo esquema de columnas que el dataset
-    sintético (scripts/generar_dataset.py: tipo_proceso + 6 lecturas + horas_transcurridas +
-    calidad_final), pero con calidad_real y tiempo_real_horas verificados en campo en vez de
-    simulados. Tabla nueva y separada del dataset sintético a propósito: no se mezclan datos
-    simulados con reales en el mismo origen. scripts/exportar_retroalimentacion.py la vuelca a
-    CSV y scripts/train_models.py la combina con el dataset sintético al reentrenar.
+    Tabla NUEVA (aún no existe en Neon; la crea migration.sql) — a diferencia de
+    lecturas_ambientales, aquí no hay esquema heredado que respetar, así que ya se
+    define directamente alineada con el hardware real: sin humedad_ambiental (BMP280
+    no la mide) y con lluvia como booleano (lluvia_detectada), no como float
+    sintético. humedad_grano se guarda CRUDO (mismo criterio que
+    lecturas_ambientales) para no mezclar unidades calibradas y sin calibrar en la
+    misma columna; la conversión a % se hace en tiempo de entrenamiento con
+    rules.humedad_grano_raw_a_porcentaje, igual que en el resto del pipeline.
+
+    Cada fila es un ejemplo etiquetado: tipo_proceso + lecturas del final del ciclo +
+    calidad_real y tiempo_real_horas verificados en campo (no simulados).
+    scripts/recolectar_datos_reales.py la combina con lecturas_ambientales al armar
+    el dataset de entrenamiento.
     """
 
     __tablename__ = "retroalimentacion_ml"
@@ -24,9 +31,8 @@ class RetroalimentacionML(Base):
     tipo_proceso = Column(String(50), nullable=False)
     temperatura_grano = Column(Numeric(5, 2), nullable=True)
     temperatura_ambiental = Column(Numeric(5, 2), nullable=True)
-    humedad_ambiental = Column(Numeric(5, 2), nullable=True)
-    humedad_grano = Column(Numeric(5, 2), nullable=True)
-    lluvia = Column(Numeric(4, 3), nullable=True)
+    humedad_grano = Column(SmallInteger, nullable=True)  # crudo de ADC, igual que lecturas_ambientales
+    lluvia_detectada = Column(Boolean, nullable=True)
     luz = Column(Numeric(10, 2), nullable=True)
     tiempo_real_horas = Column(Numeric(6, 2), nullable=False)
     calidad_real = Column(String(20), nullable=False)

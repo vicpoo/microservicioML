@@ -1,0 +1,18 @@
+{
+  "isolation_forest": {
+    "contamination": "auto",
+    "f1_test": 0.17777777777777778,
+    "recall_test": 0.9629629629629629
+  },
+  "rf_tipo_anomalia": {
+    "n_estimators": 100,
+    "max_depth": 8,
+    "f1_macro_test": 1.0
+  },
+  "ga_lluvia": {
+    "metrica_fitness": "f1_macro",
+    "generaciones": 100,
+    "tam_poblacion": 150,
+    "nota": "hiperparámetros afinados pero comportamiento degenerado (predice 100% positivo en test) persiste; requiere más datos, no más ajuste"
+  }
+}

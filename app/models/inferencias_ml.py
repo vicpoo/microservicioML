@@ -21,7 +21,11 @@ class InferenciaML(Base):
 
     id_inferencia = Column(Integer, primary_key=True, index=True)
     temperatura = Column(Numeric(5, 2), nullable=False)
-    humedad = Column(Numeric(5, 2), nullable=False)
+    # NOT NULL en el esquema original (prototipo de clustering, pre-BMP280); se manda
+    # None desde notifier.py porque humedad_ambiental ya no existe como variable.
+    # Requiere migration.sql: ALTER COLUMN humedad DROP NOT NULL (ver Sección 7 de la
+    # migración actualizada) antes de que el INSERT funcione contra la Neon real.
+    humedad = Column(Numeric(5, 2), nullable=True)
     cluster_id = Column(Integer, nullable=False)
     cluster_nombre = Column(String(50), nullable=False)
     recomendacion = Column(Text, nullable=False)

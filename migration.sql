@@ -123,4 +123,18 @@ ALTER TABLE public.predicciones
     ADD COLUMN IF NOT EXISTS riesgo_lluvia_proxima boolean,
     ADD COLUMN IF NOT EXISTS horas_anticipacion_lluvia smallint;
 
+-- 8. NLP paso 4: historial de reportes en lenguaje natural (ver NLP/README.md). Cada llamada a
+--    GET /anomalies/{id_lote}/reporte guarda una fila aquí -- mismo criterio que ya siguen
+--    `predicciones`/`alertas`/`recomendaciones` (una fila nueva por generación, no se
+--    sobrescribe la anterior), para poder ver cómo cambió el reporte de un lote con el tiempo.
+CREATE TABLE IF NOT EXISTS public.reportes_lote (
+    id_reporte serial PRIMARY KEY,
+    id_lote integer NOT NULL,
+    reporte_texto text NOT NULL,
+    fecha_generado timestamp DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_reportes_lote_lote_fecha
+    ON public.reportes_lote (id_lote, fecha_generado DESC);
+
 COMMIT;

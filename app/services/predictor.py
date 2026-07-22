@@ -14,10 +14,12 @@ ARTIFACTS_DIR = os.path.join(os.path.dirname(__file__), "..", "ml", "artifacts")
 class Predictor:
     """Predicciones de negocio: horas restantes de secado y calidad final estimada.
 
-    Ambas son RandomForest entrenados sobre el dataset sintético (scripts/generar_dataset.py).
-    La predicción de calidad a partir de una sola lectura es una estimación de tendencia
-    ("si las condiciones actuales se mantienen"), no un veredicto definitivo; su exactitud
-    mejorará entrenando con datos reales de lotes ya finalizados.
+    Ambas son RandomForest, entrenados exclusivamente con datos reales de Neon
+    (scripts/recolectar_datos_reales.py + scripts/train_models.py; el dataset sintético
+    quedó deprecado). Mientras no haya suficientes lotes reales finalizados para entrenarlos
+    (ver ML/README.md, paso 12), `rf_tiempo.joblib`/`rf_calidad.joblib` simplemente no existen
+    en `app/ml/artifacts/` y `_load()` devuelve None -- `predecir()` responde con
+    tiempo_estimado_horas/calidad_estimada en None en vez de usar un artefacto viejo o inventado.
     """
 
     def __init__(self, artifacts_dir: str = ARTIFACTS_DIR):

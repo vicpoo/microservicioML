@@ -7,7 +7,7 @@ import logging
 
 from fastapi import FastAPI
 
-from app.api.routes import dispositivos, history, inference, internal
+from app.api.routes import dispositivos, history, inference, internal, nlp
 from app.core.config import get_settings
 from app.models.database import init_db
 from app.services import poller
@@ -20,6 +20,7 @@ app.include_router(inference.router, prefix="/api/v1")   # api key (manual/testi
 app.include_router(internal.router, prefix="/api/v1")     # api key (Gestor -> MLL)
 app.include_router(history.router, prefix="/api/v1")       # api key (opcional: historial)
 app.include_router(dispositivos.router, prefix="/api/v1")  # api key (registro de tokens FCM)
+app.include_router(nlp.router, prefix="/api/v1")            # api key (clasificador de texto libre)
 
 
 @app.on_event("startup")

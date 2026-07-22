@@ -81,10 +81,13 @@ lugar calcule sus propias columnas derivadas por separado — mismo principio qu
   pero nunca lo usaba realmente).
 - **Paso 11 — artefactos de producción:** se copiaron `isolation_forest.joblib` y
   `rf_tipo_anomalia.joblib` corregidos a `app/ml/artifacts/`. `rf_calidad.joblib` y
-  `rf_tiempo_restante.joblib` siguen siendo los viejos (esquema incompatible, `humedad_ambiental`)
-  porque no hay datos reales suficientes para reentrenarlos — ya no tumban `/detect` gracias al
-  try/except agregado en `predictor.py`/`anomaly_detector.py` (se registra un warning y el campo
-  queda en `None` en vez de un error 500).
+  `rf_tiempo_restante.joblib` (los viejos, esquema incompatible con `humedad_ambiental`) no
+  tumbaban `/detect` gracias al try/except en `predictor.py`, pero siempre fallaban en silencio.
+  **Actualización posterior:** se eliminaron esos dos artefactos por completo (venían del
+  dataset sintético deprecado; ver `scripts/generar_dataset.py`, ya no existe). `predictor.py`
+  ahora simplemente no los carga (`_load()` devuelve None si el archivo no existe) y responde
+  `null` en esos dos campos hasta que `scripts/train_models.py` los regenere con suficientes
+  lotes reales finalizados (paso 12).
 - **Paso 11 — notificaciones push:** se agregó Firebase Cloud Messaging (`app/services/fcm.py`,
   con el mismo patrón de inicialización perezosa que ya usaba el correo SMTP). Nueva tabla
   `dispositivos_usuario` (ver sección 5 de `migration.sql`, **todavía no aplicada en Neon**) y

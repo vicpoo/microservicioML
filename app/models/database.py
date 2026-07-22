@@ -27,6 +27,7 @@ def init_db() -> None:
         modelos_ml,
         predicciones,
         recomendaciones,
+        reportes_lote,
         retroalimentacion_ml,
         sensores,
     )

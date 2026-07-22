@@ -13,6 +13,11 @@ from app.models.database import SessionLocal
 from app.models.lotes_cafe import LoteCafe
 from app.models.predicciones import Prediccion
 from app.models.recomendaciones import Recomendacion
+from app.models.reportes_lote import ReporteLote
+from NLP.buscar_reportes import TOP_N_RESULTADOS_DEFAULT, buscar_reportes
+from NLP.generar_reporte import generar_reporte_lote
+from NLP.recopilar_datos_reporte import recopilar_datos_lote
+from NLP.registrar_reporte import guardar_reporte, historial_reportes
 
 # OPCIONAL: tu API móvil puede leer alertas/predicciones/recomendaciones directo de Neon
 # (son tablas normales, el MLL ya escribió ahí) sin pasar por aquí. Estos endpoints quedan
@@ -61,6 +66,52 @@ def listar_alertas(
                 "fecha_generada": r.fecha_generada.isoformat() if r.fecha_generada else None,
             }
             for r in registros
+        ]
+    finally:
+        db.close()
+
+
+@router.get("/anomalies/reportes/buscar")
+def buscar_reportes_endpoint(
+    id_usuario: int = Query(description="Usuario dueño de la sesión (lo resuelve quien llama, ej. tu API móvil)"),
+    query: str = Query(min_length=1, description="Texto libre a buscar, ej. 'lluvia crítica' o 'secado estancado'"),
+    top_n: int = Query(default=TOP_N_RESULTADOS_DEFAULT, le=50),
+):
+    """Paso 3 de la opción A (buscador de historial, ver NLP/README.md): busca con BM25 sobre
+    TODOS los reportes ya generados (GET .../reporte) de TODOS los lotes de `id_usuario` -- no
+    de un solo lote, a diferencia del resto de endpoints de este archivo. El aislamiento por
+    usuario aquí es más simple que `_verificar_dueno` (que valida un id_lote puntual): el JOIN
+    contra `lotes_cafe.id_usuario` ya arma el corpus SOLO con reportes de lotes de ese usuario,
+    así que no hay manera de que aparezca un reporte ajeno en los resultados.
+
+    Ruta estática (no `/anomalies/{id_lote}/...`) a propósito: esta búsqueda es sobre el
+    historial completo del usuario, no sobre un lote en particular."""
+    db: Session = SessionLocal()
+    try:
+        filas = (
+            db.query(ReporteLote)
+            .join(LoteCafe, ReporteLote.id_lote == LoteCafe.id_lote)
+            .filter(LoteCafe.id_usuario == id_usuario)
+            .all()
+        )
+        if not filas:
+            return []
+
+        corpus = [(f.id_reporte, f.reporte_texto) for f in filas]
+        por_id = {f.id_reporte: f for f in filas}
+        resultados = buscar_reportes(corpus, query, top_n=top_n)
+        return [
+            {
+                "id_reporte": r.id_reporte,
+                "id_lote": por_id[r.id_reporte].id_lote,
+                "score": round(r.score, 4),
+                "reporte_texto": r.texto,
+                "fecha_generado": (
+                    por_id[r.id_reporte].fecha_generado.isoformat()
+                    if por_id[r.id_reporte].fecha_generado else None
+                ),
+            }
+            for r in resultados
         ]
     finally:
         db.close()
@@ -123,5 +174,52 @@ def listar_recomendaciones(
             }
             for r in registros
         ]
+    finally:
+        db.close()
+
+
+@router.get("/anomalies/{id_lote}/reporte")
+def obtener_reporte(
+    id_lote: int,
+    id_usuario: int = Query(description="Usuario dueño de la sesión (lo resuelve quien llama, ej. tu API móvil)"),
+):
+    """PLN (NLP/, pasos 1-4): reporte en lenguaje natural del lote -- combina lo que ya sabe el
+    resto del sistema (alertas, predicciones, recomendaciones) en un solo texto legible, en vez
+    de que la app móvil tenga que armarlo ella misma a partir de 3 endpoints distintos. Cada
+    llamada genera el texto AL MOMENTO (siempre refleja el estado actual) y además queda
+    guardada en `reportes_lote` -- mismo criterio que predicciones/alertas/recomendaciones: se
+    acumula historial, no se sobrescribe (ver GET .../reportes, plural, para verlo)."""
+    db: Session = SessionLocal()
+    try:
+        _verificar_dueno(db, id_lote, id_usuario)
+        datos = recopilar_datos_lote(db, id_lote)
+        # _verificar_dueno ya garantiza que el lote existe -- si datos viniera None aquí sería
+        # un bug interno, no un 404 de "lote no encontrado" (ese caso ya se descartó arriba).
+        assert datos is not None, "lote confirmado por _verificar_dueno pero recopilar_datos_lote devolvió None"
+        texto = generar_reporte_lote(datos)
+        id_reporte = guardar_reporte(db, id_lote, texto)
+        return {
+            "id_reporte": id_reporte,
+            "id_lote": id_lote,
+            "reporte_texto": texto,
+            "fecha_generado": datos.fecha_generado.isoformat(),
+        }
+    finally:
+        db.close()
+
+
+@router.get("/anomalies/{id_lote}/reportes")
+def listar_reportes(
+    id_lote: int,
+    id_usuario: int = Query(description="Usuario dueño de la sesión (lo resuelve quien llama, ej. tu API móvil)"),
+    limit: int = Query(default=10, le=200),
+):
+    """Historial de reportes ya generados para este lote (los que quedaron guardados por
+    GET .../reporte, singular), más reciente primero -- para ver cómo cambió el reporte de un
+    lote con el tiempo sin tener que regenerarlo."""
+    db: Session = SessionLocal()
+    try:
+        _verificar_dueno(db, id_lote, id_usuario)
+        return historial_reportes(db, id_lote, limit=limit)
     finally:
         db.close()

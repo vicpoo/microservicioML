@@ -137,4 +137,15 @@ CREATE TABLE IF NOT EXISTS public.reportes_lote (
 CREATE INDEX IF NOT EXISTS ix_reportes_lote_lote_fecha
     ON public.reportes_lote (id_lote, fecha_generado DESC);
 
+-- 9. Cooldown de push para anomalías generales (no lluvia, que ya tiene su propio mecanismo vía
+--    predicciones.riesgo_lluvia_proxima). Una fila por (id_lote, tipo_anomalia): se actualiza,
+--    no se acumula, cada vez que se envía un push de ese tipo para ese lote -- evita ráfagas si
+--    la misma anomalía sigue presente en lecturas consecutivas (ej. el poller cada 30s).
+CREATE TABLE IF NOT EXISTS public.ml_ultimo_push_anomalia (
+    id_lote integer NOT NULL,
+    tipo_anomalia varchar(50) NOT NULL,
+    fecha_ultimo_push timestamp NOT NULL DEFAULT now(),
+    PRIMARY KEY (id_lote, tipo_anomalia)
+);
+
 COMMIT;

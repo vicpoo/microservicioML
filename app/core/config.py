@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     # graves (ver app/api/routes/inference.py::ejecutar_pipeline, el push ya no depende de
     # que se haya generado una alerta formal).
     fcm_min_severidad: str = "advertencia"
+    # Minutos mínimos entre dos push de anomalía para el mismo lote+tipo, evita ráfagas si la
+    # condición persiste en lecturas consecutivas (ej. el poller cada 30s durante horas con la
+    # misma anomalía sostenida). No aplica al push de riesgo de lluvia, que ya tiene su propio
+    # debounce por transición (ver notifier.ultimo_riesgo_lluvia()).
+    fcm_cooldown_minutos: int = 30
 
     # --- Polling en tiempo real (paso 12: monitoreo) ---
     # El disparador normal es que el Gestor llame POST /internal/lecturas/nuevas apenas

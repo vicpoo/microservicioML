@@ -12,6 +12,7 @@ from app.models.dispositivos_usuario import DispositivoUsuario
 from app.models.inferencias_ml import InferenciaML
 from app.models.lotes_cafe import LoteCafe
 from app.models.modelos_ml import ModeloML
+from app.models.notificacion_push_anomalia import NotificacionPushAnomalia
 from app.models.predicciones import Prediccion
 from app.models.recomendaciones import Recomendacion
 from app.services import fcm
@@ -231,3 +232,48 @@ def enviar_push_alerta(
         db.commit()
 
     return resultado["enviados"] > 0
+
+
+def debe_notificar_anomalia(db: Session, id_lote: int, tipo_anomalia: str) -> bool:
+    """Cooldown por (id_lote, tipo_anomalia): evita ráfagas de push cuando la misma anomalía
+    sigue presente en lecturas consecutivas (ej. el poller cada 30s durante horas). Mismo patrón
+    que ultimo_riesgo_lluvia(): un SELECT fresco contra una tabla persistida real, ANTES de
+    decidir notificar -- pero con un umbral de tiempo (FCM_COOLDOWN_MINUTOS) en vez de una
+    transición booleana, porque una anomalía general no es un simple sí/no como el riesgo de
+    lluvia."""
+    anterior = (
+        db.query(NotificacionPushAnomalia)
+        .filter(
+            NotificacionPushAnomalia.id_lote == id_lote,
+            NotificacionPushAnomalia.tipo_anomalia == tipo_anomalia,
+        )
+        .first()
+    )
+    if anterior is None or anterior.fecha_ultimo_push is None:
+        return True
+    ahora_naive_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    minutos_transcurridos = (ahora_naive_utc - anterior.fecha_ultimo_push).total_seconds() / 60.0
+    return minutos_transcurridos >= settings.fcm_cooldown_minutos
+
+
+def registrar_push_anomalia(db: Session, id_lote: int, tipo_anomalia: str) -> None:
+    """Marca 'se acaba de notificar esta anomalía para este lote' -- upsert por (id_lote,
+    tipo_anomalia), mismo criterio que dispositivos.py::registrar_dispositivo: una sola fila por
+    combinación, se actualiza en vez de acumular historial. Solo se llama cuando
+    debe_notificar_anomalia() ya dio luz verde y se intentó el push -- si se llamara también
+    cuando el cooldown bloquea el envío, cada ciclo del poller reiniciaría el cooldown sin haber
+    notificado nada, y nunca se volvería a avisar."""
+    existente = (
+        db.query(NotificacionPushAnomalia)
+        .filter(
+            NotificacionPushAnomalia.id_lote == id_lote,
+            NotificacionPushAnomalia.tipo_anomalia == tipo_anomalia,
+        )
+        .first()
+    )
+    ahora = datetime.now(timezone.utc).replace(tzinfo=None)
+    if existente is not None:
+        existente.fecha_ultimo_push = ahora
+    else:
+        db.add(NotificacionPushAnomalia(id_lote=id_lote, tipo_anomalia=tipo_anomalia, fecha_ultimo_push=ahora))
+    db.commit()

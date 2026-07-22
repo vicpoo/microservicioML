@@ -25,6 +25,7 @@ def init_db() -> None:
         lecturas_ambientales,
         lotes_cafe,
         modelos_ml,
+        notificacion_push_anomalia,
         predicciones,
         recomendaciones,
         reportes_lote,

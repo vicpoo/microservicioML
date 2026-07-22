@@ -201,11 +201,13 @@ def ejecutar_pipeline(
                 (r["texto"] for r in recomendaciones if r["tipo"] == tipo_principal),
                 recomendaciones[0]["texto"] if recomendaciones else mensaje,
             )
-            push_enviado = notifier.enviar_push_alerta(
-                db, lote.id_lote, resultado["severidad"], recomendacion_texto,
-                titulo=rules.titulo_corto_para(tipo_principal),
-                datos_extra={"tipo": tipo_principal, "recomendacion": recomendacion_texto},
-            )
+            if notifier.debe_notificar_anomalia(db, lote.id_lote, tipo_principal):
+                push_enviado = notifier.enviar_push_alerta(
+                    db, lote.id_lote, resultado["severidad"], recomendacion_texto,
+                    titulo=rules.titulo_corto_para(tipo_principal),
+                    datos_extra={"tipo": tipo_principal, "recomendacion": recomendacion_texto},
+                )
+                notifier.registrar_push_anomalia(db, lote.id_lote, tipo_principal)
 
         # Push de riesgo de lluvia: SOLO en la transición False/None -> True, no en cada
         # lectura mientras el riesgo se mantenga True (el poller revisa cada 30s -- sin este

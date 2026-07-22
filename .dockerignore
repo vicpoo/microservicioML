@@ -1,0 +1,52 @@
+# Datos de entrenamiento (pesados; solo los leen scripts/ y los notebooks de ML/, y ninguno
+# de los dos viaja en la imagen -- el servicio en runtime nunca lee de data/).
+data/
+
+# Notebooks y docs de ML/ (pesados / no se importan en runtime).
+# OJO: esto NO excluye ML/*.py -- ver nota en el Dockerfile: internal.py importa ML.monitoreo
+# a nivel de modulo, que en cadena necesita entrenamiento.py, evaluacion.py y
+# prediccion_lluvia_ga.py para que el proceso pueda arrancar.
+ML/*.ipynb
+ML/.ipynb_checkpoints/
+ML/README.md
+ML/definicion_problema_kajve.md
+
+# Scripts de entrenamiento/recoleccion offline -- confirmado que nada bajo app/ los importa.
+scripts/
+
+# Tests
+tests/
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# Cache / artefactos de Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Control de versiones
+.git/
+.gitignore
+
+# Secretos -- NUNCA deben viajar dentro de la imagen
+.env
+.env.*
+*firebase-adminsdk*.json
+
+# Bases sqlite locales de desarrollo/tests
+*.db
+
+# Editor / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

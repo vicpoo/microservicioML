@@ -11,7 +11,7 @@ class RecomendacionOut(BaseModel):
 
 class PrediccionOut(BaseModel):
     tiempo_estimado_horas: Optional[float] = None
-    calidad_estimada: Optional[str] = None
+    calidad_estimada: Optional[float] = None
     confianza: Optional[float] = None
     # Algoritmo Genético (paso 7/11) -- riesgo de que llueva en las próximas
     # horas_anticipacion_lluvia horas, no si está lloviendo ahora (eso ya lo cubren las

@@ -126,7 +126,7 @@ def registrar_recomendaciones(db: Session, id_lote: int, recomendaciones: List[D
 
 def registrar_prediccion(
     db: Session, id_lote: int, id_modelo: int, tiempo_estimado_horas: Optional[float],
-    calidad_estimada: Optional[str], confianza: Optional[float],
+    calidad_estimada: Optional[float], confianza: Optional[float],
     riesgo_lluvia_proxima: Optional[bool] = None, horas_anticipacion_lluvia: Optional[int] = None,
 ) -> None:
     db.add(Prediccion(

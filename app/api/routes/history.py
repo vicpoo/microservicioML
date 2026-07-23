@@ -138,7 +138,7 @@ def listar_predicciones(
                 "id_prediccion": r.id_prediccion,
                 "id_lote": r.id_lote,
                 "tiempo_estimado_horas": float(r.tiempo_estimado_horas) if r.tiempo_estimado_horas is not None else None,
-                "calidad_estimada": r.calidad_estimada,
+                "calidad_estimada": float(r.calidad_estimada) if r.calidad_estimada is not None else None,
                 "confianza": float(r.confianza) if r.confianza is not None else None,
                 "fecha_prediccion": r.fecha_prediccion.isoformat() if r.fecha_prediccion else None,
             }

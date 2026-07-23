@@ -88,12 +88,17 @@ Dado que sí hay anomalía, predice cuál: `temperatura_alta`, `lluvia_detectada
 
 ### 3.3 Tiempo restante y calidad final — **no disponibles todavía**
 
-Dos `RandomForest` (regresor y clasificador) iban a predecir horas restantes de secado y
-calidad final. Se eliminaron los artefactos que existían (estaban entrenados con un dataset
-sintético viejo, esquema incompatible con el hardware real) y hoy `predictor.py` responde
-`tiempo_estimado_horas` / `calidad_estimada` en `null` hasta que se acumulen suficientes lotes
-reales terminados (`retroalimentacion_ml`) y se corra `scripts/train_models.py`. `GET
+Dos `RandomForestRegressor` iban a predecir horas restantes de secado y calidad final (esta
+última en la escala SCA 0-100 usada por un catador/Q Grader — ver Sección 6.3 más abajo; ya no
+es una categoría tipo "buena"). Se eliminaron los artefactos que existían (estaban entrenados con
+un dataset sintético viejo, esquema incompatible con el hardware real) y hoy `predictor.py`
+responde `tiempo_estimado_horas` / `calidad_estimada` en `null` hasta que se acumulen suficientes
+lotes reales terminados (`retroalimentacion_ml`) y se corra `scripts/train_models.py`. `GET
 /internal/monitoreo/salud` dice cuándo ya hay datos suficientes.
+
+`calidad_estimada` es siempre una aproximación indirecta basada en condiciones ambientales de
+secado, nunca una catación real — eso solo lo puede reportar un humano (ver `calidad_real` en la
+Sección 6.3).
 
 ### 3.4 Algoritmo Genético — riesgo de lluvia próxima
 
@@ -268,21 +273,47 @@ la fila real de `lecturas_ambientales` en Neon y corre el mismo pipeline que 6.1
 
 **Response 200:** misma forma que 6.1 (`InferenceResponse`).
 
-### 6.3 `POST /api/v1/internal/lotes/{id_lote}/resultado-real` — retroalimentación real
+### 6.3 `POST /api/v1/internal/lotes/{id_lote}/resultado-real` — tiempo real de secado
 
-Se llama cuando el productor reporta el resultado final de un lote (para reentrenar con datos
-reales, no sintéticos).
+Lo llama el Gestor justo al finalizar un lote (`internal/infrastructure/mll/client.go` del
+repo Go). Solo reporta el tiempo real de secado, que es lo único que se conoce en ese momento —
+el puntaje de calidad todavía no existe (ver 6.3.1). Es un **upsert**: si ya existe una fila de
+retroalimentación para el lote (ej. un reintento), la actualiza en vez de duplicarla o fallar.
 
 **Request:**
 ```json
-{ "calidad_real": "buena", "tiempo_real_horas": 180.5 }
+{ "tiempo_real_horas": 180.5 }
 ```
-`calidad_real`: `excelente | buena | regular | baja`. `tiempo_real_horas` es opcional (si no se
-manda, se calcula desde `fecha_inicio_secado` del lote hasta ahora).
+`tiempo_real_horas` es opcional (si no se manda, se calcula desde `fecha_inicio_secado` del lote
+hasta ahora).
 
 **Response 201:**
 ```json
 { "id_retroalimentacion": 12, "mensaje": "Resultado real registrado" }
+```
+
+### 6.3.1 `POST /api/v1/internal/lotes/{id_lote}/catacion` — puntaje real de catación
+
+El puntaje real de calidad (escala SCA 0-100, protocolo de la Specialty Coffee Association — ver
+Documento de Calidad del Café, Sección 7) normalmente **no existe todavía cuando el lote termina
+de secarse** — lo asigna un catador/Q Grader semanas después, sobre café ya trillado. Por eso es
+un endpoint separado de 6.3, en vez de pedir este dato al finalizar el lote. Requiere que el lote
+ya tenga una fila de retroalimentación (creada por 6.3); si no, responde 404.
+
+**Request:**
+```json
+{ "puntaje_sca": 87.5 }
+```
+`puntaje_sca`: número entre 0 y 100.
+
+**Response 200:**
+```json
+{ "id_retroalimentacion": 12, "mensaje": "Puntaje de catación registrado" }
+```
+
+**Response 404** (si el lote no ha reportado resultado-real todavía):
+```json
+{ "detail": "Este lote todavía no ha reportado resultado-real (tiempo de secado); no se puede registrar un puntaje de catación sin eso primero" }
 ```
 
 ### 6.4 `GET /api/v1/internal/monitoreo/salud` — salud del modelo (paso 12)
@@ -337,13 +368,19 @@ de la escala del motor de reglas (`normal/advertencia/riesgo/critico`) — ver m
 
 ### 6.6 `GET /api/v1/anomalies/{id_lote}/predicciones` — historial de predicciones
 
-Query: `id_usuario` (requerido), `limit`.
+Query: `id_usuario` (requerido), `limit`. `calidad_estimada` es un puntaje escala SCA 0-100
+(no una categoría) — ver Sección 3.3 y 6.3.1.
 ```json
 [
   {
     "id_prediccion": 301, "id_lote": 42,
     "tiempo_estimado_horas": null, "calidad_estimada": null, "confianza": null,
     "fecha_prediccion": "2026-07-22T10:00:01"
+  },
+  {
+    "id_prediccion": 302, "id_lote": 42,
+    "tiempo_estimado_horas": 42.5, "calidad_estimada": 78.0, "confianza": 64.2,
+    "fecha_prediccion": "2026-07-23T09:00:01"
   }
 ]
 ```
@@ -580,13 +617,25 @@ sin problema, y 2 vCPU / 1 GB da margen cómodo de sobra.
 | `POLLING_BATCH_SIZE` | `50` | Filas por corrida del poller |
 | `INTERNAL_API_KEY` | vacío | Header `X-Internal-Api-Key` exigido entre servicios (vacío = sin exigencia, solo dev) |
 | `MODELO_VERSION` | `2.0.0` | Se refleja en las respuestas del pipeline |
+| `REENTRENAMIENTO_AUTOMATICO_ENABLED` | `false` | Reentrena solo, en un hilo de fondo, cuando ya haya datos nuevos suficientes (ver `app/services/reentrenador.py`) |
+| `REENTRENAMIENTO_INTERVALO_HORAS` | `24` | Cada cuánto revisa si vale la pena reentrenar |
+
+**Nota sobre el Gestor (repo Go, `APIMOBIL-GO`):** para que llame a este microservicio (Sección
+6.3/6.3.1) necesita `MLL_BASE_URL` (URL base de este servicio) y `MLL_API_KEY` (el mismo valor que
+`INTERNAL_API_KEY` de arriba) configurados en su propio `.env`. Si `MLL_BASE_URL` queda vacío, el
+Gestor simplemente no llama a estos endpoints (modo no-op, no falla nada del lado del Gestor).
 
 ---
 
 ## 11. Pendientes conocidos
 
-- Correr `migration.sql` contra Neon si aún no se aplicó (crea `dispositivos_usuario`,
-  `ml_estado_polling`, `reportes_lote`, columnas de riesgo de lluvia en `predicciones`).
+- Correr `migration.sql` contra Neon si aún no se aplicó, incluyendo el paso 10 (migra
+  `calidad_real`/`calidad_estimada` de categorías de texto a puntaje SCA 0-100 — ver Sección 3.3
+  y 6.3.1). Los pasos 1-9 (crea `dispositivos_usuario`, `ml_estado_polling`, `reportes_lote`,
+  columnas de riesgo de lluvia en `predicciones`) ya están aplicados.
+- Configurar `MLL_BASE_URL`/`MLL_API_KEY` en el `.env` del Gestor (repo Go) para que de verdad
+  llame a 6.3/6.3.1 -- sin esto, `retroalimentacion_ml` sigue sin llenarse aunque el código de
+  ambos lados ya esté listo.
 - Configurar credenciales reales de Firebase (sección 8) para que el push deje de ser un no-op.
 - `rf_calidad.joblib`/`rf_tiempo_restante.joblib` (sección 3.3) siguen sin existir hasta
   acumular suficientes lotes reales terminados.

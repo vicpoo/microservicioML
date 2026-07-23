@@ -187,7 +187,13 @@ def evaluar_tiempo_restante(test_df: pd.DataFrame, min_lotes: int = 5) -> dict:
     return {"baseline_promedio_tipico": evaluar_regresion(etiquetado["horas_restantes"], pred_baseline)}
 
 
-# --- 6. Calidad final (clasificación) -- bloqueado hoy -------------------------------------------
+# --- 6. Calidad final (regresión, escala SCA 0-100) -- bloqueado hoy -----------------------------
+# Antes era clasificación (4 categorías); ver migration.sql paso 10 y
+# scripts/train_models.py::entrenar_regresor_calidad para la versión real que sí está
+# implementada. Esta función es del pipeline offline de notebooks (ML/entrenamiento.py), que se
+# deja igual de sin-implementar que antes -- solo se actualiza el criterio para reflejar que
+# calidad_real ahora es un puntaje continuo, se evalúa con RMSE/MAE (evaluar_regresion), no con
+# accuracy/f1.
 
 def evaluar_calidad(test_df: pd.DataFrame, min_lotes: int = 5) -> dict:
     if "_calidad_final_lote" not in test_df.columns:
@@ -199,9 +205,9 @@ def evaluar_calidad(test_df: pd.DataFrame, min_lotes: int = 5) -> dict:
         return {
             "omitido": f"solo {n_lotes} lote(s) en test con calidad_real conocida; se necesitan "
                        f"al menos {min_lotes}.",
-            "baseline_propuesto": "predecir siempre la clase de calidad más común entre los lotes ya reportados",
+            "baseline_propuesto": "predecir siempre el puntaje promedio de calidad_real entre los lotes ya reportados",
         }
-    raise NotImplementedError("Suficientes lotes -- implementar evaluación real aquí.")
+    raise NotImplementedError("Suficientes lotes -- implementar evaluación real aquí con evaluar_regresion.")
 
 
 # --- 7. Recomendaciones -- verificación de cobertura, no métricas de ML --------------------------

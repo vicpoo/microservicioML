@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from app.api.routes import dispositivos, history, inference, internal, nlp
 from app.core.config import get_settings
 from app.models.database import init_db
-from app.services import poller
+from app.services import poller, reentrenador
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +35,23 @@ async def startup_event():
     else:
         logger.info("[main] POLLING_ENABLED=false -- el servicio queda 100%% reactivo (solo webhook).")
 
+    if settings.reentrenamiento_automatico_enabled:
+        # Cierra el ciclo de aprendizaje real (ver app/services/reentrenador.py): sin esto, el
+        # modelo nunca se actualiza con calidad_real/horas_restantes reales aunque se acumulen,
+        # a menos que alguien corra los scripts a mano.
+        app.state.reentrenador_task = asyncio.create_task(reentrenador.loop_reentrenamiento())
+    else:
+        logger.info("[main] REENTRENAMIENTO_AUTOMATICO_ENABLED=false -- el reentrenamiento sigue siendo manual (scripts/train_models.py).")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     task = getattr(app.state, "poller_task", None)
     if task is not None:
         task.cancel()
+    reentrenador_task = getattr(app.state, "reentrenador_task", None)
+    if reentrenador_task is not None:
+        reentrenador_task.cancel()
 
 
 @app.get("/health")

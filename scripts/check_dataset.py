@@ -18,5 +18,7 @@ if len(df):
     print(df["_severidad"].value_counts().to_string())
     print("\nTipos de anomalia:")
     print(df.loc[df["_es_anomalia"], "_tipo_anomalia"].value_counts().to_string())
-    print("\nCalidad final por lote (solo lotes con dato real):")
-    print(df.dropna(subset=["_calidad_final_lote"]).drop_duplicates("id_lote")["_calidad_final_lote"].value_counts().to_string())
+    print("\nCalidad final por lote (solo lotes con dato real, escala SCA 0-100):")
+    # value_counts() ya no tiene sentido con un puntaje continuo (migration.sql paso 10); describe()
+    # da min/max/media/percentiles, más útil para ver si el rango reportado es razonable.
+    print(df.dropna(subset=["_calidad_final_lote"]).drop_duplicates("id_lote")["_calidad_final_lote"].describe().to_string())

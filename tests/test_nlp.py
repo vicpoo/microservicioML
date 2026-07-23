@@ -117,11 +117,13 @@ def test_reporte_riesgo_lluvia_true_y_false():
 
 
 def test_reporte_con_prediccion_completa_menciona_tiempo_y_calidad():
-    pred = UltimaPrediccion(tiempo_estimado_horas=120.5, calidad_estimada="buena", confianza=82.3,
+    # calidad_estimada es un puntaje escala SCA 0-100 desde la migración (ver migration.sql
+    # paso 10), ya no una categoría tipo "buena".
+    pred = UltimaPrediccion(tiempo_estimado_horas=120.5, calidad_estimada=82.0, confianza=82.3,
                              riesgo_lluvia_proxima=None, horas_anticipacion_lluvia=None, fecha=None)
     texto = generar_reporte_lote(_datos_base(ultima_prediccion=pred))
     assert "tiempo restante estimado" in texto
-    assert "calidad final estimada de 'buena'" in texto
+    assert "calidad final estimada de 82/100" in texto
     assert "82%" in texto
 
 

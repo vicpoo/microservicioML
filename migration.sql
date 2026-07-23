@@ -148,4 +148,70 @@ CREATE TABLE IF NOT EXISTS public.ml_ultimo_push_anomalia (
     PRIMARY KEY (id_lote, tipo_anomalia)
 );
 
+-- 10. Migración a escala SCA (0-100): calidad_real y calidad_estimada dejan de ser categorías
+--     (excelente/buena/regular/baja) y pasan a ser un puntaje numérico 0-100, igual al que usa
+--     un catador Q Grader bajo el protocolo SCA (ver Documento de Calidad del Café, Sección 7).
+--
+--     calidad_real ahora se reporta en dos pasos separados en el tiempo, no en uno solo:
+--       (a) al finalizar el lote (Gestor/Go), se conoce tiempo_real_horas -> INSERT.
+--       (b) semanas después, cuando existe un puntaje de catación real -> UPDATE de esa misma
+--           fila. Por eso calidad_real se vuelve nullable, y se agrega un índice UNIQUE sobre
+--           id_lote para poder hacer upsert (ON CONFLICT (id_lote) DO UPDATE) en vez de tener
+--           que buscar manualmente la fila a actualizar.
+--
+--     calidad_estimada (la predicción del ML durante el secado, a partir de sensores) también
+--     pasa a numérico, pero sigue sin ser una catación real -- es una aproximación indirecta
+--     basada en condiciones de secado. Esto debe quedar explícito en la UI/documentación, no
+--     solo en el tipo de dato.
+--
+--     Los bloques siguientes verifican el tipo de columna actual antes de convertir: si ya se
+--     corrió esta migración una vez (columna ya numeric), no vuelve a ejecutar el ALTER, así no
+--     hay riesgo de aplastar con NULL datos numéricos reales que ya se hayan empezado a guardar.
+--     La primera vez que corre, sí vacía cualquier valor categórico viejo (no hay forma de
+--     convertir "buena" a un número) -- en Neon, retroalimentacion_ml tiene 0 filas y
+--     calidad_estimada nunca se llenó (rf_calidad.joblib no existe en este código), así que no
+--     hay dato real que se pierda.
+DO $$
+BEGIN
+    IF (SELECT data_type FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'retroalimentacion_ml'
+          AND column_name = 'calidad_real') <> 'numeric' THEN
+        ALTER TABLE public.retroalimentacion_ml ALTER COLUMN calidad_real DROP NOT NULL;
+        ALTER TABLE public.retroalimentacion_ml ALTER COLUMN calidad_real TYPE numeric(5,2) USING NULL;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    ALTER TABLE public.retroalimentacion_ml
+        ADD CONSTRAINT chk_retroalimentacion_ml_calidad_rango
+        CHECK (calidad_real IS NULL OR (calidad_real >= 0 AND calidad_real <= 100));
+EXCEPTION WHEN duplicate_object THEN
+    NULL;
+END $$;
+
+-- Una sola fila de retroalimentación por lote (para poder hacer upsert). Sustituye al índice no
+-- único del paso 2; se elimina ese índice porque el unique ya cubre el mismo caso de uso.
+DROP INDEX IF EXISTS public.ix_retroalimentacion_ml_lote;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_retroalimentacion_ml_lote
+    ON public.retroalimentacion_ml (id_lote);
+
+DO $$
+BEGIN
+    IF (SELECT data_type FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'predicciones'
+          AND column_name = 'calidad_estimada') <> 'numeric' THEN
+        ALTER TABLE public.predicciones ALTER COLUMN calidad_estimada TYPE numeric(5,2) USING NULL;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    ALTER TABLE public.predicciones
+        ADD CONSTRAINT chk_predicciones_calidad_rango
+        CHECK (calidad_estimada IS NULL OR (calidad_estimada >= 0 AND calidad_estimada <= 100));
+EXCEPTION WHEN duplicate_object THEN
+    NULL;
+END $$;
+
 COMMIT;

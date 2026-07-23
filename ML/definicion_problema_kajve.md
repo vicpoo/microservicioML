@@ -45,7 +45,7 @@ un usuario que no es su propietario (ver Sección 5).
 | Alertas | Motor de reglas determinista (no ML) | **Implementado y verificado** |
 | Recomendaciones | Motor de plantillas parametrizadas (no ML) | **Implementado y verificado** |
 | Tiempo estimado de secado | Regresión | Heurística por proceso (sin datos suficientes para entrenar aún) |
-| Calidad estimada del grano | Clasificación (excelente/buena/regular/baja) | Regla basada en historial de alertas del ciclo (sin datos suficientes para entrenar aún) |
+| Calidad estimada del grano | Regresión (puntaje escala SCA 0-100) | Regla basada en historial de alertas del ciclo (sin datos suficientes para entrenar aún) |
 | Probabilidad de lluvia | Clasificación / nowcasting a corto plazo | Diseño: tendencia de presión atmosférica (BMP280) |
 
 ### 3.1. Alertas y recomendaciones
@@ -66,12 +66,49 @@ finalizados con fecha de inicio y fin reales.
 
 ### 3.3. Calidad estimada del grano
 
-Clasificación con 4 categorías. Arranca con el criterio del documento de
-dominio (Sección 7): cero alertas de riesgo/crítico → excelente; solo
-advertencias → buena; alguna alerta de riesgo → regular; alguna crítica o
-riesgo no atendida → baja. Se vuelve un modelo entrenado cuando haya lotes
-finalizados con calidad conocida, idealmente contrastada contra catación
-real (protocolo SCA/CQI).
+Regresión: un puntaje en la escala SCA (0-100), la misma que usa un
+catador/Q Grader bajo el protocolo de la Specialty Coffee Association (ver
+Documento de Calidad del Café, Sección 7). Ya **no** son 4 categorías
+(excelente/buena/regular/baja) -- ese esquema se migró a un puntaje continuo
+(ver `migration.sql` paso 10) porque calidad_real, la retroalimentación que
+se compara contra esta predicción, ahora también es un puntaje SCA real
+reportado por catación (ver Sección 3.3.1, más abajo), no una categoría
+elegida por el productor.
+
+Arranca con una heurística basada en el historial de alertas del ciclo,
+adaptando el criterio del documento de dominio (antes expresado en 4
+categorías) a un puntaje numérico:
+
+```
+puntaje = 88 - (2 × advertencias) - (8 × riesgos) - (20 × críticos)
+puntaje = min(max(puntaje, 60), 95)
+```
+
+- Parte de 88 (equivalente al rango "excelente" de la escala SCA, 85-89.99,
+  para un lote sin incidentes) y descuenta según la cantidad y severidad de
+  las alertas generadas durante el ciclo.
+- El piso de 60 evita que la heurística caiga a valores poco realistas: un
+  lote de café real, aunque mal manejado, rara vez puntúa por debajo de 60
+  en una catación real.
+- Es solo un punto de partida razonable mientras no haya lotes suficientes
+  con `calidad_real` conocida para entrenar `rf_calidad.joblib` como
+  regresor real (ver `scripts/train_models.py::entrenar_regresor_calidad`,
+  `MIN_LOTES_CALIDAD`). Se reemplaza por el modelo entrenado en cuanto haya
+  datos suficientes.
+
+#### 3.3.1. Por qué calidad_real se reporta por separado de finalizar_lote
+
+A diferencia de casi todo lo demás en este documento, `calidad_real` (el
+puntaje SCA real) no lo puede reportar el sistema ni calcularlo el ML: lo
+asigna un humano (un catador o Q Grader) mediante una catación sensorial
+real -- aroma, sabor, acidez, cuerpo, balance, dulzor, taza limpia, etc.
+Ese resultado normalmente llega semanas o meses después de que el lote
+terminó de secarse (cuando el café ya se trilló y se catoó, no al momento
+de sacarlo del osil). Por eso el reporte de `calidad_real` está desacoplado
+de `finalizar_lote` en la API: el Gestor reporta `tiempo_real_horas` al
+finalizar (eso sí se conoce en el momento), y el puntaje de catación llega
+después, por un endpoint separado (`POST /internal/lotes/{id}/catacion`),
+cuando exista.
 
 ### 3.4. Probabilidad de lluvia
 

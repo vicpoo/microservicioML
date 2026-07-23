@@ -15,7 +15,13 @@ from app.models.lecturas_ambientales import LecturaAmbiental
 from app.models.lotes_cafe import LoteCafe
 from app.models.retroalimentacion_ml import RetroalimentacionML
 from app.schemas.inference_response import InferenceResponse
-from app.schemas.internal_events import LecturaNuevaEvent, ResultadoRealEvent, ResultadoRealResponse
+from app.schemas.internal_events import (
+    CatacionEvent,
+    CatacionResponse,
+    LecturaNuevaEvent,
+    ResultadoRealEvent,
+    ResultadoRealResponse,
+)
 from app.services import poller
 from app.services.lectura_utils import calcular_horas_transcurridas, construir_features
 from ML import monitoreo
@@ -71,9 +77,16 @@ def procesar_lectura_nueva(evento: LecturaNuevaEvent):
 
 @router.post("/lotes/{id_lote}/resultado-real", response_model=ResultadoRealResponse, status_code=201)
 def registrar_resultado_real(id_lote: int, evento: ResultadoRealEvent):
-    """RNF-19: captura la etiqueta real que reporta el productor (vía Gestor) al finalizar el
-    secado de un lote — calidad final y tiempo real. Se guarda en retroalimentacion_ml, separada
-    del dataset sintético; scripts/train_models.py la combina al reentrenar cuando hay datos."""
+    """RNF-19: captura el tiempo real de secado que reporta el Gestor al finalizar un lote (lo
+    llama internal/infrastructure/mll/client.go justo después de FinalizarLote). Se guarda en
+    retroalimentacion_ml, separada del dataset sintético; scripts/train_models.py la combina al
+    reentrenar cuando hay datos.
+
+    calidad_real (el puntaje de catación) NO se toca aquí -- llega después vía
+    POST /internal/lotes/{id_lote}/catacion. Por eso esto es un upsert: si ya existe una fila
+    para este lote (normalmente porque este mismo endpoint ya se llamó antes, ej. un reintento del
+    Gestor), se actualiza el snapshot de sensores/tiempo sin pisar un calidad_real que ya se
+    hubiera guardado."""
     db: Session = SessionLocal()
     try:
         lote = db.query(LoteCafe).filter(LoteCafe.id_lote == id_lote).first()
@@ -99,21 +112,58 @@ def registrar_resultado_real(id_lote: int, evento: ResultadoRealEvent):
         else:
             raise HTTPException(status_code=422, detail="tiempo_real_horas es obligatorio: el lote no tiene fecha_inicio_secado")
 
-        registro = RetroalimentacionML(
-            id_lote=id_lote,
-            tipo_proceso=(lote.tipo_proceso or "lavado").lower(),
-            temperatura_grano=ultima.temperatura_grano,
-            temperatura_ambiental=ultima.temperatura,
-            humedad_grano=ultima.humedad_grano,
-            lluvia_detectada=ultima.lluvia_detectada,
-            luz=ultima.luz,
-            tiempo_real_horas=round(tiempo_real_horas, 2),
-            calidad_real=evento.calidad_real,
-        )
-        db.add(registro)
+        registro = db.query(RetroalimentacionML).filter(RetroalimentacionML.id_lote == id_lote).first()
+        if registro is None:
+            registro = RetroalimentacionML(id_lote=id_lote)
+            db.add(registro)
+
+        registro.tipo_proceso = (lote.tipo_proceso or "lavado").lower()
+        registro.temperatura_grano = ultima.temperatura_grano
+        registro.temperatura_ambiental = ultima.temperatura
+        registro.humedad_grano = ultima.humedad_grano
+        registro.lluvia_detectada = ultima.lluvia_detectada
+        registro.luz = ultima.luz
+        registro.tiempo_real_horas = round(tiempo_real_horas, 2)
+        # calidad_real deliberadamente no se toca: puede ya traer un valor (catación reportada
+        # antes de tiempo, caso raro) o seguir en null (caso normal) -- este endpoint no decide.
+
         db.commit()
         db.refresh(registro)
         return ResultadoRealResponse(id_retroalimentacion=registro.id_retroalimentacion, mensaje="Resultado real registrado")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        db.close()
+
+
+@router.post("/lotes/{id_lote}/catacion", response_model=CatacionResponse, status_code=200)
+def registrar_catacion(id_lote: int, evento: CatacionEvent):
+    """Puntaje real de catación (escala SCA 0-100), reportado semanas después de que el lote
+    terminó de secarse -- por eso es un endpoint separado de resultado-real, en vez de pedir este
+    dato al finalizar el lote (cuando casi nunca existe todavía). Requiere que el lote ya haya
+    reportado su resultado-real (tiempo de secado); si no existe esa fila, no hay dónde guardar
+    el puntaje todavía."""
+    db: Session = SessionLocal()
+    try:
+        lote = db.query(LoteCafe).filter(LoteCafe.id_lote == id_lote).first()
+        if lote is None:
+            raise HTTPException(status_code=404, detail="Lote no encontrado")
+
+        registro = db.query(RetroalimentacionML).filter(RetroalimentacionML.id_lote == id_lote).first()
+        if registro is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Este lote todavía no ha reportado resultado-real (tiempo de secado); "
+                       "no se puede registrar un puntaje de catación sin eso primero",
+            )
+
+        registro.calidad_real = evento.puntaje_sca
+        db.commit()
+        db.refresh(registro)
+        return CatacionResponse(id_retroalimentacion=registro.id_retroalimentacion, mensaje="Puntaje de catación registrado")
     except HTTPException:
         raise
     except Exception as exc:

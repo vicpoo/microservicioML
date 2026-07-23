@@ -63,7 +63,7 @@ class UltimaAlerta:
 @dataclass
 class UltimaPrediccion:
     tiempo_estimado_horas: Optional[float]
-    calidad_estimada: Optional[str]
+    calidad_estimada: Optional[float]  # puntaje escala SCA 0-100, ya no una categoría (ver migration.sql paso 10)
     confianza: Optional[float]
     riesgo_lluvia_proxima: Optional[bool]
     horas_anticipacion_lluvia: Optional[int]
@@ -140,7 +140,7 @@ def _ultima_prediccion(db: Session, id_lote: int) -> Optional[UltimaPrediccion]:
         return None
     return UltimaPrediccion(
         tiempo_estimado_horas=float(prediccion.tiempo_estimado_horas) if prediccion.tiempo_estimado_horas is not None else None,
-        calidad_estimada=prediccion.calidad_estimada,
+        calidad_estimada=float(prediccion.calidad_estimada) if prediccion.calidad_estimada is not None else None,
         confianza=float(prediccion.confianza) if prediccion.confianza is not None else None,
         riesgo_lluvia_proxima=prediccion.riesgo_lluvia_proxima,
         horas_anticipacion_lluvia=prediccion.horas_anticipacion_lluvia,

@@ -58,6 +58,15 @@ class Settings(BaseSettings):
     polling_intervalo_segundos: int = 30
     polling_batch_size: int = 50
 
+    # --- Reentrenamiento automático (cierra el ciclo "el modelo aprende de sus errores": si
+    # predijo 70 y la realidad fue 90, esto hace que la PRÓXIMA predicción ya lo tenga en
+    # cuenta) ---
+    # Apagado por default a propósito: entrenar consume CPU por varios segundos/minutos y, aunque
+    # corre en un hilo aparte (no bloquea el event loop), sigue compitiendo por CPU con las
+    # peticiones en vivo del mismo proceso -- ver app/services/reentrenador.py.
+    reentrenamiento_automatico_enabled: bool = False
+    reentrenamiento_intervalo_horas: int = 24
+
     # --- Seguridad entre servicios ---
     # El MLL es un servicio interno: solo lo llaman el Servicio Gestor (para avisarle de
     # lecturas nuevas) y, si tu API móvil decide consultarlo en vez de leer Neon directo,

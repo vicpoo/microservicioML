@@ -132,10 +132,27 @@
         "url": { "raw": "{{base_url}}/api/v1/internal/lotes/{{id_lote}}/resultado-real", "host": ["{{base_url}}"], "path": ["api", "v1", "internal", "lotes", "{{id_lote}}", "resultado-real"] },
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"calidad_real\": \"buena\",\n  \"tiempo_real_horas\": 180.5\n}",
+          "raw": "{\n  \"tiempo_real_horas\": 180.5\n}",
           "options": { "raw": { "language": "json" } }
         },
-        "description": "Registra la retroalimentacion real del productor al terminar el secado. Se espera 201 con id_retroalimentacion."
+        "description": "Registra el tiempo real de secado al finalizar un lote (upsert). calidad_real ya NO va aquí -- ver el request de catación, abajo."
+      }
+    },
+    {
+      "name": "Internal - Registrar puntaje de catacion (escala SCA)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Internal-Api-Key", "value": "{{internal_api_key}}" }
+        ],
+        "url": { "raw": "{{base_url}}/api/v1/internal/lotes/{{id_lote}}/catacion", "host": ["{{base_url}}"], "path": ["api", "v1", "internal", "lotes", "{{id_lote}}", "catacion"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"puntaje_sca\": 87.5\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "Registra el puntaje real de catacion (escala SCA 0-100), reportado normalmente semanas despues de que el lote termino de secarse. Requiere que el lote ya tenga una fila de retroalimentacion (creada por resultado-real); si no, responde 404."
       }
     },
     {

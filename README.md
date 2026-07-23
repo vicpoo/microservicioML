@@ -133,11 +133,31 @@ Monitoreo manual (ver [`ML/README.md`](ML/README.md), paso 12):
 python scripts/monitorear_modelos.py
 ```
 
+Pruebas end-to-end de NLP/NLG (reportes, buscador BM25, clasificador de texto) contra la BD
+**real de producción** (Neon) — requiere correrse manualmente desde una máquina con acceso de
+red a Neon (Cowork no tiene ese acceso). Crea un lote de prueba claramente marcado, corre el
+pipeline completo y limpia todo automáticamente al final, pase o falle:
+
+```bash
+export DATABASE_URL="postgresql://...tu cadena real de Neon..."
+python scripts/e2e_nlp_produccion.py
+```
+
+Ver el docstring de `scripts/e2e_nlp_produccion.py` para el detalle de cada paso y las garantías
+de limpieza.
+
 ## 6. Pendientes conocidos
 
-- Correr `migration.sql` contra Neon (crea `retroalimentacion_ml`, `dispositivos_usuario`,
-  `ml_estado_polling`, `reportes_lote`, y quita el `NOT NULL` de `inferencias_ml.humedad`) —
-  **todavía no aplicado en producción**.
+- **`migration.sql` ya está aplicado en Neon** (confirmado contra un respaldo real:
+  `retroalimentacion_ml`, `dispositivos_usuario`, `ml_estado_polling` y `reportes_lote` existen
+  con el esquema esperado). Lo que falta ahora no es esquema, es que el Gestor de verdad llame
+  a los endpoints que llenan esas tablas -- ver los dos puntos siguientes.
+- **`retroalimentacion_ml` existe pero tiene 0 filas**: nadie ha llamado todavía
+  `POST /internal/lotes/{id_lote}/resultado-real`. Y de los 11 lotes reales, solo uno tiene
+  `estado = 'finalizado'` pero su `fecha_fin_secado` sigue en `NULL` -- el Gestor marca el
+  `estado` sin llenar esa columna, así que ni ese lote cuenta hoy para entrenar
+  `rf_tiempo_restante`/`rf_calidad`. Hace falta que el Gestor, al terminar un lote, (a) ponga
+  `fecha_fin_secado` en `lotes_cafe` y (b) llame el endpoint de resultado real.
 - Configurar credenciales reales de Firebase (`FCM_CREDENTIALS_PATH`) para que las push
   notifications dejen de ser un no-op.
 - `rf_calidad.joblib` y `rf_tiempo_restante.joblib` se eliminaron de `app/ml/artifacts/`: eran

@@ -26,6 +26,17 @@ COPY ML/ ./ML/
 # el proceso tampoco levanta.
 COPY NLP/ ./NLP/
 
+# scripts/ SOLO hace falta si activas REENTRENAMIENTO_AUTOMATICO_ENABLED=true (ver
+# app/services/reentrenador.py): recolectar_datos_reales.py + train_models.py corren dentro de
+# este mismo proceso para reentrenar sin depender de que alguien los corra a mano. El import es
+# perezoso (dentro de la funcion, no a nivel de modulo), asi que si dejas esto sin copiar y el
+# flag sigue en false (default), el servicio arranca igual de bien que antes.
+COPY scripts/ ./scripts/
+# Carpetas de datos que scripts/recolectar_datos_reales.py y scripts/train_models.py leen/escriben
+# (CSVs intermedios) -- se crean solas con os.makedirs si no existen, pero copiar data/raw/ ya
+# sembrado evita un primer ciclo con el CSV vacio si ya tenias uno recolectado localmente.
+COPY data/ ./data/
+
 EXPOSE 8000
 
 # PORT no existe en app/core/config.py (solo smtp_port) -- se resuelve aqui, a nivel Docker,

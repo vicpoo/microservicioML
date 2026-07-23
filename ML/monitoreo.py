@@ -6,13 +6,13 @@ producción (paso 11), este módulo responde dos preguntas en curso:
 
   1. ¿Las predicciones que ya se hicieron en producción (tabla `predicciones`) se parecen
      a lo que después reportó el productor como resultado real (tabla `retroalimentacion_ml`)?
-     -- monitoreo de DESEMPEÑO, reutiliza las mismas métricas (RMSE/MAE, accuracy) y el mismo
-     baseline que ML/evaluacion.py (paso 9), pero contra datos EN VIVO en vez del test.csv
-     offline.
+     -- monitoreo de DESEMPEÑO, reutiliza las mismas métricas (RMSE/MAE para tiempo Y calidad,
+     ambas son regresión desde la migración a escala SCA 0-100) y el mismo baseline que
+     ML/evaluacion.py (paso 9), pero contra datos EN VIVO en vez del test.csv offline.
   2. ¿Hay ya datos reales nuevos suficientes (lecturas nuevas en lecturas_ambientales, lotes
      finalizados en retroalimentacion_ml) como para que valga la pena reentrenar?
      -- monitoreo de DATOS, reutiliza los mismos umbrales MIN_LOTES_* que hoy bloquean
-     entrenar_regresor_tiempo/entrenar_clasificador_calidad en ML/entrenamiento.py.
+     entrenar_regresor_tiempo/entrenar_regresor_calidad en ML/entrenamiento.py.
 
 Este módulo NO reentrena solo -- solo diagnostica y recomienda. Reentrenar automáticamente
 sin revisión humana sería peligroso: el paso 10 ya mostró que un modelo puede "ganar" en
@@ -118,18 +118,17 @@ def evaluar_desempeno_produccion(db: Session) -> dict:
                        "sigue sin poder entrenarse con datos reales)."
         }
 
-    calidad = df.dropna(subset=["calidad_estimada"])
+    # calidad_real/calidad_estimada ahora son un puntaje continuo (escala SCA 0-100), no una
+    # categoría -- ya no tiene sentido "accuracy" (igualdad exacta de string); se evalúa con
+    # RMSE/MAE, igual que tiempo_restante, vía evaluar_regresion. Ver migration.sql paso 10.
+    calidad = df.dropna(subset=["calidad_estimada", "calidad_real"])
     if len(calidad) >= 1:
-        # Con tan pocos lotes reales, una matriz de confusión completa todavía no es
-        # representativa -- se reporta accuracy simple + n para no ocultar el tamaño de muestra.
-        resultado["calidad"] = {
-            "accuracy": float((calidad["calidad_real"] == calidad["calidad_estimada"]).mean()),
-            "n": int(len(calidad)),
-        }
+        resultado["calidad"] = evaluar_regresion(calidad["calidad_real"], calidad["calidad_estimada"])
     else:
         resultado["calidad"] = {
             "omitido": "ninguna predicción de calidad disponible (rf_calidad.joblib sigue sin "
-                       "poder entrenarse con datos reales)."
+                       "poder entrenarse con datos reales), o calidad_real todavía no se ha "
+                       "reportado para ningún lote (llega vía POST /internal/lotes/{id}/catacion)."
         }
 
     return resultado
@@ -220,8 +219,8 @@ def necesita_reentrenamiento(db: Session) -> dict:
     if datos["lotes_faltantes_para_calidad"] == 0:
         razones.append(
             f"Ya hay {datos['n_lotes_con_retroalimentacion_real']} lote(s) con retroalimentación "
-            f"real (>= {MIN_LOTES_CALIDAD}) -- entrenar_clasificador_calidad ya no debería "
-            "omitirse: implementa el RandomForestClassifier pendiente en ML/entrenamiento.py y "
+            f"real (>= {MIN_LOTES_CALIDAD}) -- entrenar_regresor_calidad ya no debería "
+            "omitirse: implementa el RandomForestRegressor pendiente en ML/entrenamiento.py y "
             "córrelo."
         )
     tiempo_prod = desempeno.get("tiempo_restante") if isinstance(desempeno, dict) else None

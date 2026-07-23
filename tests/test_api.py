@@ -129,13 +129,52 @@ def test_resultado_real_retroalimentacion():
     finally:
         db.close()
 
-    payload = {"calidad_real": "buena", "tiempo_real_horas": 180.5}
+    # calidad_real ya NO se manda aquí (ver CatacionEvent) -- solo tiempo_real_horas, que sí se
+    # conoce en el momento de finalizar el lote.
+    payload = {"tiempo_real_horas": 180.5}
     response = client.post("/api/v1/internal/lotes/1/resultado-real", json=payload)
     assert response.status_code == 201
-    assert response.json()["id_retroalimentacion"] > 0
+    id_retro = response.json()["id_retroalimentacion"]
+    assert id_retro > 0
 
-    resp_invalida = client.post("/api/v1/internal/lotes/1/resultado-real", json={"calidad_real": "pesima"})
-    assert resp_invalida.status_code == 422
+    # Reintento del Gestor (mismo lote, mismo endpoint): debe actualizar la misma fila (upsert
+    # por id_lote), no crear una segunda -- id_retroalimentacion no cambia.
+    response_retry = client.post("/api/v1/internal/lotes/1/resultado-real", json={"tiempo_real_horas": 181.0})
+    assert response_retry.status_code == 201
+    assert response_retry.json()["id_retroalimentacion"] == id_retro
 
     resp_lote_inexistente = client.post("/api/v1/internal/lotes/9999/resultado-real", json=payload)
     assert resp_lote_inexistente.status_code == 404
+
+
+def test_catacion_requiere_resultado_real_primero():
+    _seed_lotes()
+    db = SessionLocal()
+    try:
+        if not db.query(LoteCafe).filter(LoteCafe.id_lote == 2).first():
+            db.add(LoteCafe(
+                id_lote=2, id_usuario=USUARIO_A, id_sensor=1, nombre_lote="Lote de A (catación)",
+                codigo_qr="QR-TEST-2", tipo_proceso="lavado",
+            ))
+            db.commit()
+        db.add(LecturaAmbiental(
+            id_sensor=1, id_lote=2, temperatura=25.0, humedad_grano=11,
+            temperatura_grano=27.0, luz=30000, lluvia_detectada=False,
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    # Todavía no se reportó resultado-real para el lote 2 -> no hay dónde guardar el puntaje.
+    resp_sin_tiempo = client.post("/api/v1/internal/lotes/2/catacion", json={"puntaje_sca": 87.5})
+    assert resp_sin_tiempo.status_code == 404
+
+    # Ahora sí se reporta el tiempo real primero (flujo normal: finalizar_lote).
+    client.post("/api/v1/internal/lotes/2/resultado-real", json={"tiempo_real_horas": 150.0})
+
+    resp_ok = client.post("/api/v1/internal/lotes/2/catacion", json={"puntaje_sca": 87.5})
+    assert resp_ok.status_code == 200
+
+    # Fuera de rango (escala SCA es 0-100) debe rechazarse por validación.
+    resp_invalido = client.post("/api/v1/internal/lotes/2/catacion", json={"puntaje_sca": 150})
+    assert resp_invalido.status_code == 422

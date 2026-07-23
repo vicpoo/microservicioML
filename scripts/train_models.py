@@ -8,7 +8,9 @@ Artefactos:
   1. isolation_forest.joblib   -> IsolationForest, detección de outliers no supervisada
   2. rf_tipo_anomalia.joblib   -> RandomForestClassifier, predice tipo de anomalía (incluye "normal")
   3. rf_tiempo_restante.joblib -> RandomForestRegressor, horas restantes de secado
-  4. rf_calidad.joblib         -> RandomForestClassifier, calidad final estimada
+  4. rf_calidad.joblib         -> RandomForestRegressor, puntaje de calidad estimado (escala SCA
+                                  0-100; ya no es un clasificador de 4 categorías -- ver
+                                  Documento de Calidad del Café, Sección 7, y migration.sql paso 10)
 
 Cada artefacto es un sklearn Pipeline completo (incluye el one-hot de tipo_proceso), así el
 servicio solo arma un DataFrame de una fila con las columnas crudas y llama .predict().
@@ -167,14 +169,19 @@ def entrenar_regresor_tiempo(df: pd.DataFrame):
     return metricas
 
 
-def entrenar_clasificador_calidad(df: pd.DataFrame):
+def entrenar_regresor_calidad(df: pd.DataFrame):
+    """RandomForestRegressor sobre calidad_real (escala SCA 0-100). Antes era un clasificador de
+    4 categorías (excelente/buena/regular/baja); ver migration.sql paso 10 para el detalle de la
+    migración. Mismo patrón que entrenar_regresor_tiempo() -- ya no hace falta el chequeo de "al
+    menos 2 categorías distintas" que tenía el clasificador, un valor continuo no tiene ese
+    problema."""
     df_etiquetado = df.dropna(subset=["_calidad_final_lote"])
     n_lotes = df_etiquetado["id_lote"].nunique()
-    if n_lotes < MIN_LOTES_CALIDAD or df_etiquetado["_calidad_final_lote"].nunique() < 2:
+    if n_lotes < MIN_LOTES_CALIDAD:
         return {
             "omitido": f"solo {n_lotes} lote(s) con calidad_real conocida "
                        f"(retroalimentacion_ml); se necesitan al menos {MIN_LOTES_CALIDAD} "
-                       "y al menos 2 categorías distintas. Usa el criterio basado en "
+                       "para un split por lote razonable. Usa el criterio basado en "
                        "historial de alertas mientras tanto (ver definicion_problema_kajve.md, "
                        "Sección 3.3).",
             "n_lotes_disponibles": int(n_lotes),
@@ -183,7 +190,7 @@ def entrenar_clasificador_calidad(df: pd.DataFrame):
     cols = CATEGORICAL_FEATURES + NUMERIC_FEATURES + ["horas_transcurridas"]
     df_etiquetado = df_etiquetado.dropna(subset=["horas_transcurridas"])
     X = df_etiquetado[cols]
-    y = df_etiquetado["_calidad_final_lote"].astype(str)
+    y = df_etiquetado["_calidad_final_lote"].astype(float)
     groups = df_etiquetado["id_lote"]
 
     splitter = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=42)
@@ -191,20 +198,16 @@ def entrenar_clasificador_calidad(df: pd.DataFrame):
 
     pipe = Pipeline([
         ("prep", _preprocesador()),
-        ("clf", RandomForestClassifier(
-            n_estimators=150, max_depth=12, class_weight="balanced_subsample", random_state=42, n_jobs=-1
-        )),
+        ("reg", RandomForestRegressor(n_estimators=150, max_depth=12, random_state=42, n_jobs=-1)),
     ])
     pipe.fit(X.iloc[train_idx], y.iloc[train_idx])
     y_pred = pipe.predict(X.iloc[test_idx])
-    metricas = {
-        "accuracy": round(float(accuracy_score(y.iloc[test_idx], y_pred)), 4),
-        "f1_macro": round(float(f1_score(y.iloc[test_idx], y_pred, average="macro")), 4),
-        "n_lotes": int(n_lotes),
-    }
+    rmse = float(np.sqrt(mean_squared_error(y.iloc[test_idx], y_pred)))
+    mae = float(mean_absolute_error(y.iloc[test_idx], y_pred))
+    metricas = {"rmse_puntos": round(rmse, 2), "mae_puntos": round(mae, 2), "n_lotes": int(n_lotes)}
+
     pipe.fit(X, y)
-    joblib.dump({"modelo": pipe, "features": cols, "clases": list(pipe.named_steps["clf"].classes_)},
-                os.path.join(ARTIFACTS_DIR, "rf_calidad.joblib"))
+    joblib.dump({"modelo": pipe, "features": cols}, os.path.join(ARTIFACTS_DIR, "rf_calidad.joblib"))
     return metricas
 
 
@@ -228,7 +231,7 @@ def main():
         resultados["rf_tiempo_restante"] = entrenar_regresor_tiempo(df)
         print("RF tiempo_restante:", resultados["rf_tiempo_restante"])
     if only in ("all", "calidad"):
-        resultados["rf_calidad"] = entrenar_clasificador_calidad(df)
+        resultados["rf_calidad"] = entrenar_regresor_calidad(df)
         print("RF calidad:", resultados["rf_calidad"])
 
     with open(metricas_path, "w", encoding="utf-8") as f:

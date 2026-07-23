@@ -13,9 +13,10 @@ Modelos y su función de entrenamiento:
   - Algoritmo Genético (lluvia próxima)       -> entrenar_ga_lluvia()
   - RandomForestRegressor (tiempo restante)   -> entrenar_regresor_tiempo() -- se omite hoy
     (0 lotes finalizados con horas_restantes conocida; guard MIN_LOTES_TIEMPO).
-  - RandomForestClassifier (calidad final)    -> entrenar_clasificador_calidad() -- se omite hoy
-    (la columna _calidad_final_lote ni siquiera existe todavía en este dataset offline; la tabla
-    retroalimentacion_ml real sigue vacía en Neon).
+  - RandomForestRegressor (calidad final, escala SCA 0-100) -> entrenar_regresor_calidad() -- se
+    omite hoy (la columna _calidad_final_lote ni siquiera existe todavía en este dataset offline;
+    la tabla retroalimentacion_ml real sigue vacía en Neon). Antes era un clasificador de 4
+    categorías -- ver migration.sql paso 10.
   - Recomendaciones: no aplica, no hay nada que entrenar (mapeo determinístico por reglas).
 
 Los artefactos se guardan en ML/artifacts/ (NO en app/ml/artifacts/, que es donde vive el
@@ -164,19 +165,22 @@ def entrenar_regresor_tiempo(df_train: pd.DataFrame, min_lotes: int = MIN_LOTES_
     raise NotImplementedError("Suficientes lotes para entrenar -- implementar RandomForestRegressor aquí.")
 
 
-def entrenar_clasificador_calidad(df_train: pd.DataFrame, min_lotes: int = MIN_LOTES_CALIDAD) -> dict:
+def entrenar_regresor_calidad(df_train: pd.DataFrame, min_lotes: int = MIN_LOTES_CALIDAD) -> dict:
+    """calidad_real ahora es un puntaje continuo (escala SCA 0-100), no una categoría -- ver
+    migration.sql paso 10. Por eso ya no hace falta el guard de "al menos 2 categorías
+    distintas" que tenía el clasificador; un RandomForestRegressor no tiene ese problema."""
     if "_calidad_final_lote" not in df_train.columns:
         return {"omitido": "la columna _calidad_final_lote no existe en este dataset (la tabla "
                             "retroalimentacion_ml de Neon sigue vacía / sin migrar; ver migration.sql)."}
     etiquetado = df_train.dropna(subset=["_calidad_final_lote"])
     n_lotes = etiquetado["id_lote"].nunique()
-    if n_lotes < min_lotes or etiquetado["_calidad_final_lote"].nunique() < 2:
+    if n_lotes < min_lotes:
         return {
             "omitido": f"solo {n_lotes} lote(s) en train con calidad_real conocida; se necesitan "
-                       f"al menos {min_lotes} y >= 2 categorías distintas.",
+                       f"al menos {min_lotes}.",
             "n_lotes_disponibles": int(n_lotes),
         }
-    raise NotImplementedError("Suficientes lotes para entrenar -- implementar RandomForestClassifier aquí.")
+    raise NotImplementedError("Suficientes lotes para entrenar -- implementar RandomForestRegressor aquí.")
 
 
 def main():
@@ -206,7 +210,7 @@ def main():
     resumen["rf_tiempo_restante"] = entrenar_regresor_tiempo(train)
     print("RF tiempo_restante:", resumen["rf_tiempo_restante"])
 
-    resumen["rf_calidad"] = entrenar_clasificador_calidad(train)
+    resumen["rf_calidad"] = entrenar_regresor_calidad(train)
     print("RF calidad:", resumen["rf_calidad"])
 
     # Sello de tiempo + tamaño de train usado -- ML/monitoreo.py (paso 12) lo lee para saber

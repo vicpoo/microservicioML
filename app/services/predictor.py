@@ -4,6 +4,7 @@ import os
 from typing import Dict, Optional
 
 import joblib
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -12,7 +13,8 @@ ARTIFACTS_DIR = os.path.join(os.path.dirname(__file__), "..", "ml", "artifacts")
 
 
 class Predictor:
-    """Predicciones de negocio: horas restantes de secado y calidad final estimada.
+    """Predicciones de negocio: horas restantes de secado y calidad final estimada (puntaje
+    escala SCA 0-100 -- una aproximación basada en condiciones de secado, no una catación real).
 
     Ambas son RandomForest, entrenados exclusivamente con datos reales de Neon
     (scripts/recolectar_datos_reales.py + scripts/train_models.py; el dataset sintético
@@ -67,11 +69,26 @@ class Predictor:
         if self.rf_calidad is not None:
             try:
                 pipe = self.rf_calidad["modelo"]
-                proba = pipe.predict_proba(fila)[0]
-                clases = pipe.named_steps["clf"].classes_
-                idx = proba.argmax()
-                calidad_estimada = str(clases[idx])
-                confianza_calidad = round(float(proba[idx]) * 100, 1)
+                # rf_calidad ahora es un RandomForestRegressor (puntaje SCA 0-100), no un
+                # clasificador de 4 categorías -- ver migration.sql paso 10 y
+                # scripts/train_models.py::entrenar_regresor_calidad. calidad_estimada es una
+                # aproximación indirecta basada en condiciones de secado, NO una catación real.
+                pred = float(pipe.predict(fila)[0])
+                calidad_estimada = round(min(max(pred, 0.0), 100.0), 1)
+
+                # "confianza" ya no es la probabilidad de una clase (eso era propio del
+                # clasificador); aquí es una heurística basada en qué tan de acuerdo están los
+                # árboles del bosque entre sí: se mide la desviación estándar de sus predicciones
+                # individuales y se convierte a una escala 0-100 donde una dispersión de 25 puntos
+                # o más (un cuarto del rango completo de la escala SCA) se considera confianza
+                # nula. No es una probabilidad calibrada, es solo una señal relativa de qué tan
+                # "seguro" está el modelo de este caso en particular.
+                prep = pipe.named_steps["prep"]
+                reg = pipe.named_steps["reg"]
+                X_prep = prep.transform(fila)
+                preds_arboles = np.array([arbol.predict(X_prep)[0] for arbol in reg.estimators_])
+                dispersion = float(preds_arboles.std())
+                confianza_calidad = round(max(0.0, 100.0 - (dispersion / 25.0) * 100.0), 1)
             except Exception as exc:
                 logger.warning(f"[predictor] rf_calidad.joblib incompatible/con error, se omite calidad_estimada: {exc}")
 

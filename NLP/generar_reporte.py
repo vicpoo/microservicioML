@@ -123,7 +123,9 @@ def _seccion_prediccion_calidad_tiempo(datos: DatosReporteLote) -> str:
         partes.append(f"un tiempo restante estimado de {_formatear_horas(pred.tiempo_estimado_horas)}")
     if tiene_calidad:
         confianza_txt = f" (confianza {pred.confianza:.0f}%)" if pred.confianza is not None else ""
-        partes.append(f"una calidad final estimada de '{pred.calidad_estimada}'{confianza_txt}")
+        # calidad_estimada es un puntaje escala SCA 0-100 (ver migration.sql paso 10), no una
+        # categoría -- es una aproximación basada en condiciones de secado, no una catación real.
+        partes.append(f"una calidad final estimada de {pred.calidad_estimada:.0f}/100 en escala SCA{confianza_txt}")
     return "El modelo predice " + " y ".join(partes) + "."
 
 

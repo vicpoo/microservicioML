@@ -1,5 +1,9 @@
-# Datos de entrenamiento (pesados; solo los leen scripts/ y los notebooks de ML/, y ninguno
-# de los dos viaja en la imagen -- el servicio en runtime nunca lee de data/).
+# Datos de entrenamiento (pesados). Los notebooks de ML/ los leen pero no viajan en la imagen.
+# scripts/recolectar_datos_reales.py y scripts/train_models.py SÍ pueden tocar esta carpeta en
+# runtime (ver app/services/reentrenador.py, si REENTRENAMIENTO_AUTOMATICO_ENABLED=true), pero
+# ambos hacen os.makedirs(..., exist_ok=True) antes de escribir -- no necesitan que data/ ya
+# exista en la imagen, la crean solos en el primer ciclo. Por eso data/ se sigue excluyendo aquí
+# (ver Dockerfile: ya no se copia con COPY, a diferencia de scripts/ que sí hace falta).
 data/
 
 # Notebooks y docs de ML/ (pesados / no se importan en runtime).
@@ -14,9 +18,6 @@ ML/definicion_problema_kajve.md
 # Doc de NLP/ (no se importa en runtime). No hay .ipynb que excluir aqui -- todos los .py de
 # NLP/ (incluyendo entrenar_clasificador_texto.py y preparar_datos_clasificador.py) viajan.
 NLP/README.md
-
-# Scripts de entrenamiento/recoleccion offline -- confirmado que nada bajo app/ los importa.
-scripts/
 
 # Tests
 tests/

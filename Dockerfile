@@ -32,10 +32,10 @@ COPY NLP/ ./NLP/
 # perezoso (dentro de la funcion, no a nivel de modulo), asi que si dejas esto sin copiar y el
 # flag sigue en false (default), el servicio arranca igual de bien que antes.
 COPY scripts/ ./scripts/
-# Carpetas de datos que scripts/recolectar_datos_reales.py y scripts/train_models.py leen/escriben
-# (CSVs intermedios) -- se crean solas con os.makedirs si no existen, pero copiar data/raw/ ya
-# sembrado evita un primer ciclo con el CSV vacio si ya tenias uno recolectado localmente.
-COPY data/ ./data/
+# data/ NO viaja en la imagen a proposito: ni el proceso en runtime (app/) ni el reentrenador la
+# necesitan pre-sembrada -- recolectar_datos_reales.py hace os.makedirs("data/raw", exist_ok=True)
+# antes de escribir su CSV, y train_models.py lee ese CSV recien escrito en el mismo ciclo (no uno
+# viejo horneado en la imagen). Copiarla solo infla la imagen con un dataset que se regenera solo.
 
 EXPOSE 8000
 

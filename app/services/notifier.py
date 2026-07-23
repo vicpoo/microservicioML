@@ -1,6 +1,6 @@
 #app/services/notifier.py
 import smtplib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from typing import Dict, List, Optional
 
@@ -94,8 +94,32 @@ def registrar_alerta(db: Session, id_lote: int, id_sensor: Optional[int], tipo_a
     return alerta.id_alerta
 
 
+def _recomendacion_reciente_duplicada(db: Session, id_lote: int, texto: str) -> bool:
+    """Evita filas duplicadas en recomendaciones cuando el mismo problema persiste en lecturas
+    consecutivas (ej. el poller cada 30s durante horas) -- mismo patrón que
+    debe_notificar_anomalia(): un SELECT fresco contra la tabla real, ANTES de insertar, en vez
+    de acumular una fila idéntica por cada ciclo. Reutiliza FCM_COOLDOWN_MINUTOS -- recomendaciones
+    no tiene columna de "tipo" separada, así que el duplicado se identifica por texto idéntico
+    para el mismo lote, igual que ya se hacía para deduplicar dentro de un mismo request en
+    Recommender.generar()."""
+    ahora_naive_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    limite = ahora_naive_utc - timedelta(minutes=settings.fcm_cooldown_minutos)
+    existente = (
+        db.query(Recomendacion)
+        .filter(
+            Recomendacion.id_lote == id_lote,
+            Recomendacion.texto == texto,
+            Recomendacion.fecha_generada > limite,
+        )
+        .first()
+    )
+    return existente is not None
+
+
 def registrar_recomendaciones(db: Session, id_lote: int, recomendaciones: List[Dict[str, str]]) -> None:
     for rec in recomendaciones:
+        if _recomendacion_reciente_duplicada(db, id_lote, rec["texto"]):
+            continue
         db.add(Recomendacion(id_lote=id_lote, texto=rec["texto"], origen="modelo_ml"))
     db.commit()
 
